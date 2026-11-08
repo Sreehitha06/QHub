@@ -1,0 +1,56 @@
+
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Graduation Cap -->
+    <path
+        android:fillColor="#B1A496"
+        android:pathData="M54,16
+            L82,29
+            L54,42
+            L26,29 Z" />
+
+    <!-- Cap Base -->
+    <path
+        android:fillColor="#6F8B9B"
+        android:pathData="M36,33
+            L36,40
+            Q54,49 72,40
+            L72,33 Z" />
+
+    <!-- Tassel -->
+    <path
+        android:strokeColor="#6F8B9B"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M82,29 L82,42" />
+
+    <!-- Q Symbol -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2B4C63"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M54,40
+            A20,20 0 1,0 54,80
+            A20,20 0 1,0 54,40" />
+
+    <!-- Q Tail -->
+    <path
+        android:strokeColor="#2B4C63"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M65,68 L77,80" />
+
+    <!-- Checkmark -->
+    <path
+        android:strokeColor="#6F8B9B"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M43,59 L51,67 L65,51" />
+
+</vector>

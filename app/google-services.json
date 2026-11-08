@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "771300677138",
+    "project_id": "qhub-aeeac",
+    "storage_bucket": "qhub-aeeac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:771300677138:android:b2b897ce923f8a9b082acb",
+        "android_client_info": {
+          "package_name": "com.qhub.quizapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4q9F3W77lBinw2JkrQyv4AyDYLb1ohBQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

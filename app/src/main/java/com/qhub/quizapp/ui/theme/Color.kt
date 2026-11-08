@@ -1,11 +1,17 @@
+
 package com.qhub.quizapp.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// QHub Brand Colors
+val QHubCream = Color(0xFFF0EEE8)
+val QHubTaupe = Color(0xFFB1A496)
+val QHubBlueGray = Color(0xFF6F8B9B)
+val QHubDeepBlue = Color(0xFF2B4C63)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Supporting colors
+val QHubWhite = Color(0xFFFFFFFF)
+val QHubDarkText = Color(0xFF2B4C63)
+val QHubMutedText = Color(0xFF5C6266)
+val QHubLightTaupe = Color(0xFFE4DDD4)
+val QHubBorder = Color(0xFFB1A496)
