@@ -1,9 +1,11 @@
+
 package com.qhub.quizapp
 
 import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -91,6 +93,31 @@ fun QHubLoginScreen() {
     var isFindingSubjects by remember { mutableStateOf(false) }
     var subjectsLoaded by remember { mutableStateOf(false) }
 
+    fun returnToAuth() {
+
+        auth.signOut()
+
+        context.getSharedPreferences(
+            "QHubPrefs",
+            Context.MODE_PRIVATE
+        ).edit()
+            .remove("role_$activeUid")
+            .apply()
+
+        activeUid = ""
+        email = ""
+        password = ""
+
+        subjects = emptyList()
+        subjectsLoaded = false
+        isFindingSubjects = false
+        isLoading = false
+
+        currentScreen = QHubScreen.AUTH
+        isRegistering = false
+        selectedRole = "Student"
+    }
+
     fun openStudentDetails(uid: String, userEmail: String) {
 
         activeUid = uid
@@ -155,9 +182,7 @@ fun QHubLoginScreen() {
             }
     }
 
-    // ----------------------------------------------------
     // FIREBASE SESSION HANDLING
-    // ----------------------------------------------------
 
     LaunchedEffect(Unit) {
 
@@ -201,9 +226,7 @@ fun QHubLoginScreen() {
         }
     }
 
-    // ----------------------------------------------------
     // SCREEN NAVIGATION
-    // ----------------------------------------------------
 
     when (currentScreen) {
 
@@ -387,9 +410,7 @@ fun QHubLoginScreen() {
             )
         }
 
-        // ------------------------------------------------
         // STUDENT DETAILS
-        // ------------------------------------------------
 
         QHubScreen.STUDENT_DETAILS -> {
 
@@ -415,6 +436,10 @@ fun QHubLoginScreen() {
                 isFindingSubjects = isFindingSubjects,
                 isLoading = isLoading,
 
+                onBackToAuth = {
+                    returnToAuth()
+                },
+
                 onRefreshSubjects = {
 
                     findSubjectsForStudent(
@@ -436,8 +461,6 @@ fun QHubLoginScreen() {
                         }
                     )
                 },
-
-                // CORRECTED STUDENT DETAILS VALIDATION
 
                 onProceed = proceed@{
 
@@ -549,9 +572,7 @@ fun QHubLoginScreen() {
             )
         }
 
-        // ------------------------------------------------
         // TEMPORARY STUDENT DASHBOARD HANDOFF
-        // ------------------------------------------------
 
         QHubScreen.STUDENT_DASHBOARD_PLACEHOLDER -> {
 
@@ -593,9 +614,7 @@ fun QHubLoginScreen() {
     }
 }
 
-// --------------------------------------------------------
 // FIND SUBJECTS
-// --------------------------------------------------------
 
 private fun findSubjectsForStudent(
     repository: StudentRepository,
@@ -622,9 +641,7 @@ private fun findSubjectsForStudent(
     )
 }
 
-// --------------------------------------------------------
 // AUTH SCREEN
-// --------------------------------------------------------
 
 @Composable
 private fun AuthScreen(
@@ -848,9 +865,7 @@ private fun AuthScreen(
     }
 }
 
-// --------------------------------------------------------
 // STUDENT DETAILS SCREEN
-// --------------------------------------------------------
 
 @Composable
 private fun StudentDetailsScreen(
@@ -875,9 +890,15 @@ private fun StudentDetailsScreen(
     isFindingSubjects: Boolean,
     isLoading: Boolean,
 
+    onBackToAuth: () -> Unit,
     onRefreshSubjects: () -> Unit,
     onProceed: () -> Unit
 ) {
+
+    // System/phone back button also returns to authentication.
+    BackHandler {
+        onBackToAuth()
+    }
 
     Box(
         Modifier
@@ -896,7 +917,32 @@ private fun StudentDetailsScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(12.dp))
+
+            // NEW BACK BUTTON
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                TextButton(
+                    onClick = onBackToAuth,
+                    contentPadding = PaddingValues(
+                        horizontal = 8.dp,
+                        vertical = 4.dp
+                    )
+                ) {
+
+                    Text(
+                        "← Back",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = DeepBlue
+                    )
+                }
+            }
 
             QHubLogo()
 
@@ -1114,9 +1160,7 @@ private fun StudentDetailsScreen(
     }
 }
 
-// --------------------------------------------------------
 // TEMPORARY STUDENT DASHBOARD HANDOFF
-// --------------------------------------------------------
 
 @Composable
 private fun StudentDashboardHandoffScreen(
@@ -1179,9 +1223,7 @@ private fun StudentDashboardHandoffScreen(
     }
 }
 
-// --------------------------------------------------------
 // QHUB LOGO
-// --------------------------------------------------------
 
 @Composable
 fun QHubLogo() {
@@ -1278,9 +1320,7 @@ fun QHubLogo() {
     }
 }
 
-// --------------------------------------------------------
 // BACKGROUND PATTERN
-// --------------------------------------------------------
 
 @Composable
 fun QHubBackgroundPattern() {
@@ -1331,9 +1371,7 @@ fun QHubBackgroundPattern() {
     }
 }
 
-// --------------------------------------------------------
 // ROLE BUTTON
-// --------------------------------------------------------
 
 @Composable
 fun RoleButton(
@@ -1368,9 +1406,7 @@ fun RoleButton(
     }
 }
 
-// --------------------------------------------------------
 // TEXT FIELD
-// --------------------------------------------------------
 
 @Composable
 fun QHubTextField(
