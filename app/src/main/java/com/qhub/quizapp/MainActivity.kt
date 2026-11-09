@@ -33,11 +33,19 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 
+// ----------------------------------------------------
+// QHUB COLOURS
+// ----------------------------------------------------
+
 private val White = Color(0xFFFFFFFF)
 private val Beige = Color(0xFFE6D5C3)
 private val LightBeige = Color(0xFFF5EDE4)
 private val BlueGray = Color(0xFF6F8B9B)
 private val DeepBlue = Color(0xFF2B4C63)
+
+// ----------------------------------------------------
+// MAIN ACTIVITY
+// ----------------------------------------------------
 
 class MainActivity : ComponentActivity() {
 
@@ -45,14 +53,23 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+
             MaterialTheme(
                 colorScheme = lightColorScheme(
                     primary = DeepBlue,
+                    onPrimary = White,
                     secondary = BlueGray,
+                    onSecondary = White,
                     background = White,
-                    surface = White
+                    onBackground = DeepBlue,
+                    surface = White,
+                    onSurface = DeepBlue,
+                    surfaceVariant = LightBeige,
+                    onSurfaceVariant = BlueGray,
+                    outline = Beige
                 )
             ) {
+
                 QHubLoginScreen()
             }
         }
@@ -69,12 +86,75 @@ fun QHubLoginScreen() {
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
 
-    var selectedRole by remember { mutableStateOf("Student") }
-    var isRegistering by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    var selectedRole by remember {
+        mutableStateOf("Student")
+    }
+
+    var isRegistering by remember {
+        mutableStateOf(false)
+    }
+
+    var name by remember {
+        mutableStateOf("")
+    }
+
+    var email by remember {
+        mutableStateOf("")
+    }
+
+    var password by remember {
+        mutableStateOf("")
+    }
+
+    var isLoading by remember {
+        mutableStateOf(false)
+    }
+
+    // Dashboard navigation state
+
+    var showTeacherDashboard by remember {
+        mutableStateOf(false)
+    }
+
+    var teacherName by remember {
+        mutableStateOf("Teacher")
+    }
+
+    var teacherEmail by remember {
+        mutableStateOf("")
+    }
+
+    // Show teacher dashboard after successful login
+
+    if (showTeacherDashboard) {
+
+        TeacherDashboard(
+            teacherName = teacherName,
+            teacherEmail = teacherEmail,
+            onLogout = {
+
+                auth.signOut()
+
+                showTeacherDashboard = false
+
+                selectedRole = "Student"
+                email = ""
+                password = ""
+                name = ""
+                isRegistering = false
+
+                Toast.makeText(
+                    context,
+                    "Logged out successfully",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        )
+
+        return
+    }
+
+    // LOGIN SCREEN UI
 
     Box(
         modifier = Modifier
@@ -95,7 +175,6 @@ fun QHubLoginScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // QHub logo
             QHubLogo()
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -136,6 +215,7 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(24.dp))
 
             // ROLE SELECTOR
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -182,7 +262,8 @@ fun QHubLoginScreen() {
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            // NAME FIELD FOR REGISTRATION
+            // NAME FIELD
+
             if (isRegistering) {
 
                 QHubTextField(
@@ -195,6 +276,7 @@ fun QHubLoginScreen() {
             }
 
             // EMAIL FIELD
+
             QHubTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -205,6 +287,7 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(15.dp))
 
             // PASSWORD FIELD
+
             QHubTextField(
                 value = password,
                 onValueChange = { password = it },
@@ -215,10 +298,15 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(25.dp))
 
             // LOGIN / REGISTER BUTTON
+
             Button(
                 onClick = {
 
-                    if (email.isBlank() || password.isBlank()) {
+                    if (
+                        email.isBlank() ||
+                        password.isBlank()
+                    ) {
+
                         Toast.makeText(
                             context,
                             "Please enter email and password",
@@ -228,7 +316,11 @@ fun QHubLoginScreen() {
                         return@Button
                     }
 
-                    if (isRegistering && name.isBlank()) {
+                    if (
+                        isRegistering &&
+                        name.isBlank()
+                    ) {
+
                         Toast.makeText(
                             context,
                             "Please enter your name",
@@ -241,6 +333,8 @@ fun QHubLoginScreen() {
                     isLoading = true
 
                     if (isRegistering) {
+
+                        // FIREBASE REGISTRATION
 
                         auth.createUserWithEmailAndPassword(
                             email.trim(),
@@ -266,15 +360,23 @@ fun QHubLoginScreen() {
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
                                     ).edit()
-                                        .putString("role_$uid", selectedRole)
+                                        .putString(
+                                            "role_$uid",
+                                            selectedRole
+                                        )
                                         .apply()
                                 }
 
                                 Toast.makeText(
                                     context,
                                     "Registration successful! Welcome $selectedRole",
-                                    Toast.LENGTH_SHORT
+                                    Toast.LENGTH_LONG
                                 ).show()
+
+                                // Return to login screen
+
+                                isRegistering = false
+                                name = ""
 
                             } else {
 
@@ -289,6 +391,8 @@ fun QHubLoginScreen() {
 
                     } else {
 
+                        // FIREBASE LOGIN
+
                         auth.signInWithEmailAndPassword(
                             email.trim(),
                             password
@@ -298,20 +402,51 @@ fun QHubLoginScreen() {
 
                             if (task.isSuccessful) {
 
-                                val uid = auth.currentUser?.uid
+                                val user = auth.currentUser
+
+                                val uid = user?.uid
 
                                 val savedRole = uid?.let {
+
                                     context.getSharedPreferences(
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
-                                    ).getString("role_$it", selectedRole)
+                                    ).getString(
+                                        "role_$it",
+                                        selectedRole
+                                    )
+
                                 } ?: selectedRole
 
-                                Toast.makeText(
-                                    context,
-                                    "Login successful! Welcome $savedRole",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                if (savedRole == "Teacher") {
+
+                                    teacherName =
+                                        user?.displayName
+                                            ?: "Teacher"
+
+                                    teacherEmail =
+                                        user?.email ?: email
+
+                                    showTeacherDashboard = true
+
+                                    Toast.makeText(
+                                        context,
+                                        "Welcome $teacherName",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+
+                                } else {
+
+                                    // Student dashboard will be developed separately.
+
+                                    auth.signOut()
+
+                                    Toast.makeText(
+                                        context,
+                                        "Student dashboard will be available soon.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
 
                             } else {
 
@@ -325,13 +460,17 @@ fun QHubLoginScreen() {
                         }
                     }
                 },
+
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
+
                 shape = RoundedCornerShape(15.dp),
+
                 colors = ButtonDefaults.buttonColors(
                     containerColor = DeepBlue
                 ),
+
                 enabled = !isLoading
             ) {
 
@@ -359,7 +498,8 @@ fun QHubLoginScreen() {
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // SWITCH BETWEEN LOGIN AND REGISTRATION
+            // LOGIN / REGISTER SWITCH
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -410,7 +550,371 @@ fun QHubLoginScreen() {
 }
 
 // ----------------------------------------------------
-// QHUB LOGO - CAP DIRECTLY ABOVE Q
+// TEACHER DASHBOARD
+// ----------------------------------------------------
+
+@Composable
+fun TeacherDashboard(
+    teacherName: String,
+    teacherEmail: String,
+    onLogout: () -> Unit
+) {
+
+    var showProfile by remember {
+        mutableStateOf(false)
+    }
+
+    var showCreateClassMessage by remember {
+        mutableStateOf(false)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(White)
+    ) {
+
+        QHubBackgroundPattern()
+
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+
+            // TOP BAR
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DeepBlue)
+                    .padding(
+                        horizontal = 20.dp,
+                        vertical = 12.dp
+                    ),
+
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Text(
+                    text = "QHub",
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = White
+                )
+
+                TextButton(
+                    onClick = {
+                        showProfile = true
+                    }
+                ) {
+
+                    Text(
+                        text = "👤",
+                        fontSize = 26.sp
+                    )
+
+                    Spacer(modifier = Modifier.width(5.dp))
+
+                    Text(
+                        text = "Profile",
+                        color = White,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            // MAIN DASHBOARD
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 25.dp),
+
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+
+                // QHUB HEADING
+
+                Text(
+                    text = "QHub",
+                    fontSize = 55.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DeepBlue,
+                    letterSpacing = (-2).sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // GREETING
+
+                Text(
+                    text = "Hello, Teacher!",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DeepBlue
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Welcome to your teaching dashboard",
+                    fontSize = 15.sp,
+                    color = BlueGray,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(45.dp))
+
+                // CREATE CLASS CARD
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+
+                    shape = RoundedCornerShape(20.dp),
+
+                    colors = CardDefaults.cardColors(
+                        containerColor = LightBeige
+                    ),
+
+                    elevation = CardDefaults.cardElevation(
+                        defaultElevation = 3.dp
+                    )
+                ) {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+
+                        Text(
+                            text = "Create New Class",
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepBlue
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "Create and manage your classes in QHub.",
+                            fontSize = 14.sp,
+                            color = BlueGray,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(22.dp))
+
+                        Button(
+                            onClick = {
+                                showCreateClassMessage = true
+                            },
+
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+
+                            shape = RoundedCornerShape(13.dp),
+
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DeepBlue,
+                                contentColor = White
+                            )
+                        ) {
+
+                            Text(
+                                text = "+  Create Class",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------
+    // TEACHER PROFILE
+    // ------------------------------------------------
+
+    if (showProfile) {
+
+        AlertDialog(
+            onDismissRequest = {
+                showProfile = false
+            },
+
+            shape = RoundedCornerShape(22.dp),
+
+            containerColor = LightBeige,
+
+            title = {
+
+                Text(
+                    text = "Teacher Profile",
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DeepBlue
+                )
+            },
+
+            text = {
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+
+                    horizontalAlignment = Alignment.CenterHorizontally,
+
+                    verticalArrangement = Arrangement.spacedBy(15.dp)
+                ) {
+
+                    // PROFILE ICON
+
+                    Text(
+                        text = "👤",
+                        fontSize = 55.sp
+                    )
+
+                    // TEACHER NAME
+
+                    TeacherProfileDetail(
+                        label = "Teacher Name",
+                        value = teacherName
+                    )
+
+                    // EMAIL
+
+                    TeacherProfileDetail(
+                        label = "Email Address",
+                        value = teacherEmail
+                    )
+
+                    // PLACEHOLDER INFORMATION
+
+                    TeacherProfileDetail(
+                        label = "Department",
+                        value = "Not provided"
+                    )
+
+                    TeacherProfileDetail(
+                        label = "Designation",
+                        value = "Faculty"
+                    )
+                }
+            },
+
+            confirmButton = {
+
+                TextButton(
+                    onClick = {
+                        showProfile = false
+                    }
+                ) {
+
+                    Text(
+                        text = "Close",
+                        color = DeepBlue
+                    )
+                }
+            },
+
+            dismissButton = {
+
+                TextButton(
+                    onClick = {
+                        showProfile = false
+                        onLogout()
+                    }
+                ) {
+
+                    Text(
+                        text = "Logout",
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------
+    // CREATE CLASS PLACEHOLDER
+    // ------------------------------------------------
+
+    if (showCreateClassMessage) {
+
+        AlertDialog(
+            onDismissRequest = {
+                showCreateClassMessage = false
+            },
+
+            title = {
+                Text(
+                    text = "Create New Class",
+                    color = DeepBlue
+                )
+            },
+
+            text = {
+                Text(
+                    text = "Class creation and CSV student upload " +
+                            "will be added in the next development stage.",
+                    color = BlueGray
+                )
+            },
+
+            confirmButton = {
+
+                TextButton(
+                    onClick = {
+                        showCreateClassMessage = false
+                    }
+                ) {
+                    Text("OK", color = DeepBlue)
+                }
+            }
+        )
+    }
+}
+
+// ----------------------------------------------------
+// REUSABLE PROFILE DETAIL
+// ----------------------------------------------------
+
+@Composable
+fun TeacherProfileDetail(
+    label: String,
+    value: String
+) {
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = BlueGray
+        )
+
+        Text(
+            text = value,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = DeepBlue
+        )
+    }
+}
+
+// ----------------------------------------------------
+// QHUB LOGO - GRADUATION CAP
 // ----------------------------------------------------
 
 @Composable
@@ -420,6 +924,7 @@ fun QHubLogo() {
         modifier = Modifier
             .fillMaxWidth()
             .height(135.dp),
+
         contentAlignment = Alignment.Center
     ) {
 
@@ -428,8 +933,6 @@ fun QHubLogo() {
             horizontalArrangement = Arrangement.Center
         ) {
 
-            // Q and cap are in the same Box.
-            // This makes the cap align with Q instead of the whole logo.
             Box(
                 modifier = Modifier.wrapContentSize()
             ) {
@@ -453,7 +956,6 @@ fun QHubLogo() {
                     val w = size.width
                     val h = size.height
 
-                    // Diamond top of graduation cap
                     val capTop = Path().apply {
                         moveTo(w * 0.02f, h * 0.42f)
                         lineTo(w * 0.52f, h * 0.08f)
@@ -467,7 +969,6 @@ fun QHubLogo() {
                         color = DeepBlue
                     )
 
-                    // Cap base
                     drawRoundRect(
                         color = DeepBlue,
                         topLeft = Offset(
@@ -481,7 +982,6 @@ fun QHubLogo() {
                         cornerRadius = CornerRadius(4.dp.toPx())
                     )
 
-                    // Tassel cord
                     drawLine(
                         color = Beige,
                         start = Offset(
@@ -495,7 +995,6 @@ fun QHubLogo() {
                         strokeWidth = 2.dp.toPx()
                     )
 
-                    // Tassel end
                     drawCircle(
                         color = Beige,
                         radius = 3.dp.toPx(),
@@ -507,7 +1006,6 @@ fun QHubLogo() {
                 }
             }
 
-            // Remaining letters
             Text(
                 text = "Hub",
                 fontSize = 82.sp,
@@ -533,7 +1031,6 @@ fun QHubBackgroundPattern() {
         val w = size.width
         val h = size.height
 
-        // Top-left soft circular pattern
         drawCircle(
             color = LightBeige,
             radius = 100.dp.toPx(),
@@ -552,7 +1049,6 @@ fun QHubBackgroundPattern() {
             )
         )
 
-        // Bottom-right soft pattern
         drawCircle(
             color = LightBeige,
             radius = 115.dp.toPx(),
@@ -571,13 +1067,14 @@ fun QHubBackgroundPattern() {
             )
         )
 
-        // Small decorative dots
         for (i in 0..3) {
+
             for (j in 0..3) {
 
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
+
                     center = Offset(
                         w - 58.dp.toPx() + i * 12.dp.toPx(),
                         55.dp.toPx() + j * 12.dp.toPx()
@@ -602,12 +1099,16 @@ fun RoleButton(
 
     Button(
         onClick = onClick,
+
         modifier = modifier.height(50.dp),
+
         shape = RoundedCornerShape(14.dp),
+
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) DeepBlue else White,
             contentColor = if (selected) White else DeepBlue
         ),
+
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp
         )
@@ -637,15 +1138,20 @@ fun QHubTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
+
         modifier = Modifier.fillMaxWidth(),
+
         label = {
             Text(
                 text = label,
                 color = BlueGray
             )
         },
+
         singleLine = true,
+
         shape = RoundedCornerShape(14.dp),
+
         keyboardOptions = KeyboardOptions(
             keyboardType = if (isPassword) {
                 KeyboardType.Password
@@ -653,11 +1159,13 @@ fun QHubTextField(
                 keyboardType
             }
         ),
+
         visualTransformation = if (isPassword) {
             PasswordVisualTransformation()
         } else {
             VisualTransformation.None
         },
+
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = DeepBlue,
             unfocusedBorderColor = Beige,
