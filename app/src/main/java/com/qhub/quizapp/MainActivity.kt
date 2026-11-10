@@ -1,4 +1,3 @@
-
 package com.qhub.quizapp
 
 import android.content.Context
@@ -34,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import com.qhub.quizapp.student.StudentDashboard
 
 private val White = Color(0xFFFFFFFF)
 private val Beige = Color(0xFFE6D5C3)
@@ -93,6 +93,8 @@ fun QHubLoginScreen() {
     var isFindingSubjects by remember { mutableStateOf(false) }
     var subjectsLoaded by remember { mutableStateOf(false) }
 
+    // LOGOUT AND RETURN TO AUTHENTICATION
+
     fun returnToAuth() {
 
         auth.signOut()
@@ -107,6 +109,12 @@ fun QHubLoginScreen() {
         activeUid = ""
         email = ""
         password = ""
+
+        name = ""
+        rollNumber = ""
+        department = ""
+        section = ""
+        semester = ""
 
         subjects = emptyList()
         subjectsLoaded = false
@@ -229,6 +237,8 @@ fun QHubLoginScreen() {
     // SCREEN NAVIGATION
 
     when (currentScreen) {
+
+        // AUTHENTICATION SCREEN
 
         QHubScreen.AUTH -> {
 
@@ -410,7 +420,7 @@ fun QHubLoginScreen() {
             )
         }
 
-        // STUDENT DETAILS
+        // STUDENT DETAILS SCREEN
 
         QHubScreen.STUDENT_DETAILS -> {
 
@@ -572,42 +582,13 @@ fun QHubLoginScreen() {
             )
         }
 
-        // TEMPORARY STUDENT DASHBOARD HANDOFF
+        // SREE'S STUDENT DASHBOARD
 
         QHubScreen.STUDENT_DASHBOARD_PLACEHOLDER -> {
 
-            StudentDashboardHandoffScreen(
-                name = name,
-                subjects = subjects,
-
+            StudentDashboard(
                 onLogout = {
-
-                    auth.signOut()
-
-                    context.getSharedPreferences(
-                        "QHubPrefs",
-                        Context.MODE_PRIVATE
-                    ).edit()
-                        .remove("role_$activeUid")
-                        .apply()
-
-                    email = ""
-                    password = ""
-                    activeUid = ""
-
-                    name = ""
-                    rollNumber = ""
-                    department = ""
-                    section = ""
-                    semester = ""
-
-                    subjects = emptyList()
-                    subjectsLoaded = false
-                    isFindingSubjects = false
-
-                    currentScreen = QHubScreen.AUTH
-                    isRegistering = false
-                    selectedRole = "Student"
+                    returnToAuth()
                 }
             )
         }
@@ -919,8 +900,6 @@ private fun StudentDetailsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // NEW BACK BUTTON
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start,
@@ -1156,69 +1135,6 @@ private fun StudentDetailsScreen(
             }
 
             Spacer(Modifier.height(28.dp))
-        }
-    }
-}
-
-// TEMPORARY STUDENT DASHBOARD HANDOFF
-
-@Composable
-private fun StudentDashboardHandoffScreen(
-    name: String,
-    subjects: List<String>,
-    onLogout: () -> Unit
-) {
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(White),
-
-        contentAlignment = Alignment.Center
-    ) {
-
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-
-            QHubLogo()
-
-            Text(
-                "Details saved successfully",
-                color = DeepBlue,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                "Welcome, $name",
-                color = BlueGray
-            )
-
-            Text(
-                "${subjects.size} subjects found",
-                color = BlueGray
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            Text(
-                "Student dashboard will be connected by Teammate 2.",
-                color = BlueGray,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            TextButton(onClick = onLogout) {
-                Text("Logout", color = DeepBlue)
-            }
         }
     }
 }
