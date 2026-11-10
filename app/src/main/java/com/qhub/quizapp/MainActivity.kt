@@ -1,10 +1,10 @@
+
 package com.qhub.quizapp
 
 import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,8 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
-import com.google.firebase.firestore.FirebaseFirestore
-import com.qhub.quizapp.student.StudentDashboard
 
 private val White = Color(0xFFFFFFFF)
 private val Beige = Color(0xFFE6D5C3)
@@ -61,227 +59,191 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class QHubScreen {
-    AUTH,
-    STUDENT_DETAILS,
-    STUDENT_DASHBOARD_PLACEHOLDER
-}
+// ----------------------------------------------------
+// MAIN LOGIN SCREEN
+// ----------------------------------------------------
 
 @Composable
 fun QHubLoginScreen() {
 
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
-    val repository = remember { StudentRepository() }
 
     var selectedRole by remember { mutableStateOf("Student") }
     var isRegistering by remember { mutableStateOf(false) }
-    var currentScreen by remember { mutableStateOf(QHubScreen.AUTH) }
-    var isLoading by remember { mutableStateOf(false) }
-
+    var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var activeUid by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
 
-    var name by remember { mutableStateOf("") }
-    var rollNumber by remember { mutableStateOf("") }
-    var department by remember { mutableStateOf("") }
-    var section by remember { mutableStateOf("") }
-    var semester by remember { mutableStateOf("") }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(White)
+    ) {
 
-    var subjects by remember { mutableStateOf<List<String>>(emptyList()) }
-    var isFindingSubjects by remember { mutableStateOf(false) }
-    var subjectsLoaded by remember { mutableStateOf(false) }
+        QHubBackgroundPattern()
 
-    // LOGOUT AND RETURN TO AUTHENTICATION
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
 
-    fun returnToAuth() {
+            Spacer(modifier = Modifier.height(24.dp))
 
-        auth.signOut()
+            // QHub logo
+            QHubLogo()
 
-        context.getSharedPreferences(
-            "QHubPrefs",
-            Context.MODE_PRIVATE
-        ).edit()
-            .remove("role_$activeUid")
-            .apply()
+            Spacer(modifier = Modifier.height(4.dp))
 
-        activeUid = ""
-        email = ""
-        password = ""
+            Text(
+                text = "Your Online Quiz Platform",
+                fontSize = 15.sp,
+                color = BlueGray,
+                textAlign = TextAlign.Center
+            )
 
-        name = ""
-        rollNumber = ""
-        department = ""
-        section = ""
-        semester = ""
+            Spacer(modifier = Modifier.height(30.dp))
 
-        subjects = emptyList()
-        subjectsLoaded = false
-        isFindingSubjects = false
-        isLoading = false
-
-        currentScreen = QHubScreen.AUTH
-        isRegistering = false
-        selectedRole = "Student"
-    }
-
-    fun openStudentDetails(uid: String, userEmail: String) {
-
-        activeUid = uid
-        email = userEmail
-
-        FirebaseFirestore.getInstance()
-            .collection("students")
-            .document(uid)
-            .get()
-            .addOnSuccessListener { document ->
-
-                if (document.exists()) {
-
-                    name = document.getString("name").orEmpty()
-                    rollNumber = document.getString("rollNumber").orEmpty()
-                    department = document.getString("department").orEmpty()
-                    section = document.getString("section").orEmpty()
-                    semester = document.getString("semester").orEmpty()
-
-                    subjects = (document.get("subjects") as? List<*>)
-                        ?.filterIsInstance<String>()
-                        .orEmpty()
-
-                    subjectsLoaded = true
-
-                    currentScreen =
-                        QHubScreen.STUDENT_DASHBOARD_PLACEHOLDER
-
+            Text(
+                text = if (isRegistering) {
+                    "Create Account"
                 } else {
-
-                    subjects = emptyList()
-                    subjectsLoaded = false
-
-                    currentScreen = QHubScreen.STUDENT_DETAILS
-
-                    findSubjectsForStudent(
-                        repository = repository,
-                        userEmail = userEmail,
-                        onSuccess = { found ->
-                            subjects = found
-                            subjectsLoaded = true
-                        },
-                        onFailure = { message ->
-                            Toast.makeText(
-                                context,
-                                message,
-                                Toast.LENGTH_LONG
-                            ).show()
-                        },
-                        setLoading = {
-                            isFindingSubjects = it
-                        }
-                    )
-                }
-            }
-            .addOnFailureListener {
-                Toast.makeText(
-                    context,
-                    it.message ?: "Unable to load student profile",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-    }
-
-    // FIREBASE SESSION HANDLING
-
-    LaunchedEffect(Unit) {
-
-        val currentUser = auth.currentUser
-
-        if (currentUser != null) {
-
-            val savedRole = context.getSharedPreferences(
-                "QHubPrefs",
-                Context.MODE_PRIVATE
-            ).getString("role_${currentUser.uid}", null)
-
-            activeUid = currentUser.uid
-            email = currentUser.email.orEmpty()
-
-            when (savedRole) {
-
-                "Student" -> {
-
-                    selectedRole = "Student"
-
-                    openStudentDetails(
-                        uid = currentUser.uid,
-                        userEmail = currentUser.email.orEmpty()
-                    )
-                }
-
-                "Teacher" -> {
-
-                    selectedRole = "Teacher"
-                }
-
-                else -> {
-
-                    auth.signOut()
-
-                    activeUid = ""
-                    email = ""
-                }
-            }
-        }
-    }
-
-    // SCREEN NAVIGATION
-
-    when (currentScreen) {
-
-        // AUTHENTICATION SCREEN
-
-        QHubScreen.AUTH -> {
-
-            AuthScreen(
-                selectedRole = selectedRole,
-                onRoleChange = { selectedRole = it },
-
-                isRegistering = isRegistering,
-                onRegisteringChange = {
-                    isRegistering = it
+                    "Welcome Back!"
                 },
+                fontSize = 27.sp,
+                fontWeight = FontWeight.Bold,
+                color = DeepBlue
+            )
 
-                email = email,
-                onEmailChange = { email = it },
+            Spacer(modifier = Modifier.height(7.dp))
 
-                password = password,
-                onPasswordChange = { password = it },
+            Text(
+                text = if (isRegistering) {
+                    "Create your account to get started"
+                } else {
+                    "Login to continue to your account"
+                },
+                fontSize = 14.sp,
+                color = BlueGray,
+                textAlign = TextAlign.Center
+            )
 
-                isLoading = isLoading,
+            Spacer(modifier = Modifier.height(24.dp))
 
-                onSubmit = submit@{
+            // ROLE SELECTOR
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = LightBeige,
+                        shape = RoundedCornerShape(22.dp)
+                    )
+                    .padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
 
-                    val cleanedEmail = email.trim().lowercase()
+                Text(
+                    text = "SELECT YOUR ROLE",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DeepBlue,
+                    letterSpacing = 1.2.sp
+                )
 
-                    if (cleanedEmail.isBlank() || password.isBlank()) {
+                Spacer(modifier = Modifier.height(14.dp))
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+
+                    RoleButton(
+                        text = "Student",
+                        selected = selectedRole == "Student",
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        selectedRole = "Student"
+                    }
+
+                    RoleButton(
+                        text = "Teacher",
+                        selected = selectedRole == "Teacher",
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        selectedRole = "Teacher"
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // NAME FIELD FOR REGISTRATION
+            if (isRegistering) {
+
+                QHubTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "Full Name"
+                )
+
+                Spacer(modifier = Modifier.height(15.dp))
+            }
+
+            // EMAIL FIELD
+            QHubTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = "Email Address",
+                keyboardType = KeyboardType.Email
+            )
+
+            Spacer(modifier = Modifier.height(15.dp))
+
+            // PASSWORD FIELD
+            QHubTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = "Password",
+                isPassword = true
+            )
+
+            Spacer(modifier = Modifier.height(25.dp))
+
+            // LOGIN / REGISTER BUTTON
+            Button(
+                onClick = {
+
+                    if (email.isBlank() || password.isBlank()) {
                         Toast.makeText(
                             context,
                             "Please enter email and password",
                             Toast.LENGTH_SHORT
                         ).show()
 
-                        return@submit
+                        return@Button
+                    }
+
+                    if (isRegistering && name.isBlank()) {
+                        Toast.makeText(
+                            context,
+                            "Please enter your name",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        return@Button
                     }
 
                     isLoading = true
 
-                    // REGISTRATION
-
                     if (isRegistering) {
 
                         auth.createUserWithEmailAndPassword(
-                            cleanedEmail,
+                            email.trim(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -290,49 +252,29 @@ fun QHubLoginScreen() {
                             if (task.isSuccessful) {
 
                                 val user = auth.currentUser
-                                val uid = user?.uid
 
-                                if (user == null || uid == null) {
-
-                                    Toast.makeText(
-                                        context,
-                                        "Unable to get account details",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-
-                                    return@addOnCompleteListener
-                                }
-
-                                user.updateProfile(
+                                val profileUpdates =
                                     UserProfileChangeRequest.Builder()
-                                        .setDisplayName(
-                                            cleanedEmail.substringBefore("@")
-                                        )
+                                        .setDisplayName(name.trim())
                                         .build()
-                                )
 
-                                context.getSharedPreferences(
-                                    "QHubPrefs",
-                                    Context.MODE_PRIVATE
-                                ).edit()
-                                    .putString("role_$uid", selectedRole)
-                                    .apply()
+                                user?.updateProfile(profileUpdates)
 
-                                if (selectedRole == "Student") {
+                                user?.uid?.let { uid ->
 
-                                    openStudentDetails(
-                                        uid,
-                                        user.email.orEmpty()
-                                    )
-
-                                } else {
-
-                                    Toast.makeText(
-                                        context,
-                                        "Teacher account created",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    context.getSharedPreferences(
+                                        "QHubPrefs",
+                                        Context.MODE_PRIVATE
+                                    ).edit()
+                                        .putString("role_$uid", selectedRole)
+                                        .apply()
                                 }
+
+                                Toast.makeText(
+                                    context,
+                                    "Registration successful! Welcome $selectedRole",
+                                    Toast.LENGTH_SHORT
+                                ).show()
 
                             } else {
 
@@ -347,10 +289,8 @@ fun QHubLoginScreen() {
 
                     } else {
 
-                        // LOGIN
-
                         auth.signInWithEmailAndPassword(
-                            cleanedEmail,
+                            email.trim(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -358,52 +298,20 @@ fun QHubLoginScreen() {
 
                             if (task.isSuccessful) {
 
-                                val user = auth.currentUser
-                                val uid = user?.uid
+                                val uid = auth.currentUser?.uid
 
-                                if (user == null || uid == null) {
-
-                                    Toast.makeText(
-                                        context,
-                                        "Unable to get account details",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-
-                                    return@addOnCompleteListener
-                                }
-
-                                val savedRole =
+                                val savedRole = uid?.let {
                                     context.getSharedPreferences(
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
-                                    ).getString("role_$uid", null)
+                                    ).getString("role_$it", selectedRole)
+                                } ?: selectedRole
 
-                                if (
-                                    savedRole != null &&
-                                    savedRole != selectedRole
-                                ) {
-
-                                    Toast.makeText(
-                                        context,
-                                        "Please select the correct role: $savedRole",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-
-                                } else if (selectedRole == "Student") {
-
-                                    openStudentDetails(
-                                        uid,
-                                        user.email.orEmpty()
-                                    )
-
-                                } else {
-
-                                    Toast.makeText(
-                                        context,
-                                        "Teacher login successful",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
+                                Toast.makeText(
+                                    context,
+                                    "Login successful! Welcome $savedRole",
+                                    Toast.LENGTH_SHORT
+                                ).show()
 
                             } else {
 
@@ -416,370 +324,21 @@ fun QHubLoginScreen() {
                             }
                         }
                     }
-                }
-            )
-        }
-
-        // STUDENT DETAILS SCREEN
-
-        QHubScreen.STUDENT_DETAILS -> {
-
-            StudentDetailsScreen(
-                name = name,
-                onNameChange = { name = it },
-
-                rollNumber = rollNumber,
-                onRollNumberChange = { rollNumber = it },
-
-                department = department,
-                onDepartmentChange = { department = it },
-
-                section = section,
-                onSectionChange = { section = it },
-
-                semester = semester,
-                onSemesterChange = { semester = it },
-
-                email = email,
-                subjects = subjects,
-                subjectsLoaded = subjectsLoaded,
-                isFindingSubjects = isFindingSubjects,
-                isLoading = isLoading,
-
-                onBackToAuth = {
-                    returnToAuth()
                 },
-
-                onRefreshSubjects = {
-
-                    findSubjectsForStudent(
-                        repository = repository,
-                        userEmail = email.trim().lowercase(),
-                        onSuccess = { found ->
-                            subjects = found
-                            subjectsLoaded = true
-                        },
-                        onFailure = { message ->
-                            Toast.makeText(
-                                context,
-                                message,
-                                Toast.LENGTH_LONG
-                            ).show()
-                        },
-                        setLoading = {
-                            isFindingSubjects = it
-                        }
-                    )
-                },
-
-                onProceed = proceed@{
-
-                    val cleanedName = name.trim()
-                    val cleanedRollNumber = rollNumber.trim()
-                    val cleanedDepartment = department.trim()
-                    val cleanedSection = section.trim()
-                    val cleanedSemester = semester.trim()
-                    val cleanedEmail = email.trim().lowercase()
-
-                    if (
-                        cleanedName.isBlank() ||
-                        cleanedRollNumber.isBlank() ||
-                        cleanedDepartment.isBlank() ||
-                        cleanedSection.isBlank() ||
-                        cleanedSemester.isBlank()
-                    ) {
-
-                        Toast.makeText(
-                            context,
-                            "Please complete all student details",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        return@proceed
-                    }
-
-                    val semesterNumber = cleanedSemester.toIntOrNull()
-
-                    if (
-                        semesterNumber == null ||
-                        semesterNumber <= 0
-                    ) {
-
-                        Toast.makeText(
-                            context,
-                            "Please enter a valid semester number",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        return@proceed
-                    }
-
-                    if (isFindingSubjects) {
-
-                        Toast.makeText(
-                            context,
-                            "Please wait while subjects are loading",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        return@proceed
-                    }
-
-                    if (!subjectsLoaded || subjects.isEmpty()) {
-
-                        Toast.makeText(
-                            context,
-                            "No subjects found for this email yet. Please check with your teacher.",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        return@proceed
-                    }
-
-                    if (activeUid.isBlank()) {
-
-                        Toast.makeText(
-                            context,
-                            "Your account session is missing. Please login again.",
-                            Toast.LENGTH_LONG
-                        ).show()
-
-                        return@proceed
-                    }
-
-                    isLoading = true
-
-                    repository.verifyAndSaveStudent(
-                        uid = activeUid,
-                        name = cleanedName,
-                        rollNumber = cleanedRollNumber,
-                        email = cleanedEmail,
-                        department = cleanedDepartment,
-                        section = cleanedSection,
-                        semester = cleanedSemester,
-
-                        onSuccess = { savedSubjects ->
-
-                            isLoading = false
-                            subjects = savedSubjects
-
-                            currentScreen =
-                                QHubScreen.STUDENT_DASHBOARD_PLACEHOLDER
-                        },
-
-                        onFailure = { message ->
-
-                            isLoading = false
-
-                            Toast.makeText(
-                                context,
-                                message,
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    )
-                }
-            )
-        }
-
-        // SREE'S STUDENT DASHBOARD
-
-        QHubScreen.STUDENT_DASHBOARD_PLACEHOLDER -> {
-
-            StudentDashboard(
-                onLogout = {
-                    returnToAuth()
-                }
-            )
-        }
-    }
-}
-
-// FIND SUBJECTS
-
-private fun findSubjectsForStudent(
-    repository: StudentRepository,
-    userEmail: String,
-    onSuccess: (List<String>) -> Unit,
-    onFailure: (String) -> Unit,
-    setLoading: (Boolean) -> Unit
-) {
-
-    setLoading(true)
-
-    repository.findSubjects(
-        email = userEmail.trim().lowercase(),
-
-        onSuccess = {
-            setLoading(false)
-            onSuccess(it)
-        },
-
-        onFailure = {
-            setLoading(false)
-            onFailure(it)
-        }
-    )
-}
-
-// AUTH SCREEN
-
-@Composable
-private fun AuthScreen(
-    selectedRole: String,
-    onRoleChange: (String) -> Unit,
-    isRegistering: Boolean,
-    onRegisteringChange: (Boolean) -> Unit,
-    email: String,
-    onEmailChange: (String) -> Unit,
-    password: String,
-    onPasswordChange: (String) -> Unit,
-    isLoading: Boolean,
-    onSubmit: () -> Unit
-) {
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(White)
-    ) {
-
-        QHubBackgroundPattern()
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 26.dp),
-
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-
-            Spacer(Modifier.height(24.dp))
-
-            QHubLogo()
-
-            Spacer(Modifier.height(4.dp))
-
-            Text(
-                "Your Online Quiz Platform",
-                fontSize = 15.sp,
-                color = BlueGray,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(Modifier.height(30.dp))
-
-            Text(
-                if (isRegistering) "Create Account"
-                else "Welcome Back!",
-
-                fontSize = 27.sp,
-                fontWeight = FontWeight.Bold,
-                color = DeepBlue
-            )
-
-            Spacer(Modifier.height(7.dp))
-
-            Text(
-                if (isRegistering)
-                    "Create your account to get started"
-                else
-                    "Login to continue to your account",
-
-                fontSize = 14.sp,
-                color = BlueGray,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(Modifier.height(24.dp))
-
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(
-                        LightBeige,
-                        RoundedCornerShape(22.dp)
-                    )
-                    .padding(18.dp),
-
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-
-                Text(
-                    "SELECT YOUR ROLE",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepBlue,
-                    letterSpacing = 1.2.sp
-                )
-
-                Spacer(Modifier.height(14.dp))
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-
-                    RoleButton(
-                        "Student",
-                        selectedRole == "Student",
-                        Modifier.weight(1f)
-                    ) {
-                        onRoleChange("Student")
-                    }
-
-                    RoleButton(
-                        "Teacher",
-                        selectedRole == "Teacher",
-                        Modifier.weight(1f)
-                    ) {
-                        onRoleChange("Teacher")
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(22.dp))
-
-            QHubTextField(
-                email,
-                onEmailChange,
-                "Email Address",
-                KeyboardType.Email
-            )
-
-            Spacer(Modifier.height(15.dp))
-
-            QHubTextField(
-                password,
-                onPasswordChange,
-                "Password",
-                isPassword = true
-            )
-
-            Spacer(Modifier.height(25.dp))
-
-            Button(
-                onClick = onSubmit,
-
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
-
                 shape = RoundedCornerShape(15.dp),
-
                 colors = ButtonDefaults.buttonColors(
                     containerColor = DeepBlue
                 ),
-
                 enabled = !isLoading
             ) {
 
                 if (isLoading) {
 
                     CircularProgressIndicator(
-                        Modifier.size(22.dp),
+                        modifier = Modifier.size(22.dp),
                         color = White,
                         strokeWidth = 2.dp
                     )
@@ -787,44 +346,48 @@ private fun AuthScreen(
                 } else {
 
                     Text(
-                        if (isRegistering) "Create Account"
-                        else "Login",
-
+                        text = if (isRegistering) {
+                            "Create Account"
+                        } else {
+                            "Login"
+                        },
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
+            // SWITCH BETWEEN LOGIN AND REGISTRATION
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
 
                 Text(
-                    if (isRegistering)
+                    text = if (isRegistering) {
                         "Already have an account? "
-                    else
-                        "Don't have an account? ",
-
+                    } else {
+                        "Don't have an account? "
+                    },
                     color = BlueGray,
                     fontSize = 14.sp
                 )
 
                 TextButton(
                     onClick = {
-                        onRegisteringChange(!isRegistering)
+                        isRegistering = !isRegistering
                     },
-
                     contentPadding = PaddingValues(0.dp)
                 ) {
 
                     Text(
-                        if (isRegistering) "Login"
-                        else "Register",
-
+                        text = if (isRegistering) {
+                            "Login"
+                        } else {
+                            "Register"
+                        },
                         color = DeepBlue,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -832,314 +395,23 @@ private fun AuthScreen(
                 }
             }
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             Text(
-                "Learn  •  Practice  •  Achieve",
+                text = "Learn  •  Practice  •  Achieve",
                 color = BlueGray,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
 
-// STUDENT DETAILS SCREEN
-
-@Composable
-private fun StudentDetailsScreen(
-    name: String,
-    onNameChange: (String) -> Unit,
-
-    rollNumber: String,
-    onRollNumberChange: (String) -> Unit,
-
-    department: String,
-    onDepartmentChange: (String) -> Unit,
-
-    section: String,
-    onSectionChange: (String) -> Unit,
-
-    semester: String,
-    onSemesterChange: (String) -> Unit,
-
-    email: String,
-    subjects: List<String>,
-    subjectsLoaded: Boolean,
-    isFindingSubjects: Boolean,
-    isLoading: Boolean,
-
-    onBackToAuth: () -> Unit,
-    onRefreshSubjects: () -> Unit,
-    onProceed: () -> Unit
-) {
-
-    // System/phone back button also returns to authentication.
-    BackHandler {
-        onBackToAuth()
-    }
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(White)
-    ) {
-
-        QHubBackgroundPattern()
-
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 26.dp),
-
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-
-                TextButton(
-                    onClick = onBackToAuth,
-                    contentPadding = PaddingValues(
-                        horizontal = 8.dp,
-                        vertical = 4.dp
-                    )
-                ) {
-
-                    Text(
-                        "← Back",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = DeepBlue
-                    )
-                }
-            }
-
-            QHubLogo()
-
-            Text(
-                "Your Student Details",
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Bold,
-                color = DeepBlue
-            )
-
-            Spacer(Modifier.height(6.dp))
-
-            Text(
-                "Confirm your details and subjects",
-                color = BlueGray,
-                textAlign = TextAlign.Center,
-                fontSize = 14.sp
-            )
-
-            Spacer(Modifier.height(22.dp))
-
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = LightBeige
-                ),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-
-                    Text(
-                        "Email ID",
-                        fontWeight = FontWeight.SemiBold,
-                        color = DeepBlue
-                    )
-
-                    Spacer(Modifier.height(4.dp))
-
-                    Text(email, color = BlueGray)
-
-                    Spacer(Modifier.height(14.dp))
-
-                    QHubTextField(
-                        name,
-                        onNameChange,
-                        "Full Name"
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    QHubTextField(
-                        rollNumber,
-                        onRollNumberChange,
-                        "College Roll Number"
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    QHubTextField(
-                        department,
-                        onDepartmentChange,
-                        "Department (e.g. CSE)"
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    QHubTextField(
-                        section,
-                        onSectionChange,
-                        "Section (e.g. C)"
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-
-                    QHubTextField(
-                        semester,
-                        onSemesterChange,
-                        "Semester",
-                        KeyboardType.Number
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(18.dp))
-
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = White
-                ),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-
-                    Text(
-                        "Your Subjects",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepBlue
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    if (isFindingSubjects) {
-
-                        CircularProgressIndicator(
-                            color = DeepBlue,
-                            modifier = Modifier.size(24.dp)
-                        )
-
-                    } else if (!subjectsLoaded) {
-
-                        Text(
-                            "Finding subjects using your email ID…",
-                            color = BlueGray
-                        )
-
-                    } else if (subjects.isEmpty()) {
-
-                        Text(
-                            "No subjects found for this email ID.",
-                            color = BlueGray
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-
-                        TextButton(
-                            onClick = onRefreshSubjects
-                        ) {
-                            Text(
-                                "Check again",
-                                color = DeepBlue
-                            )
-                        }
-
-                    } else {
-
-                        subjects.forEach { subject ->
-
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 5.dp),
-
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                Text(
-                                    "•",
-                                    color = DeepBlue,
-                                    fontSize = 18.sp
-                                )
-
-                                Spacer(Modifier.width(8.dp))
-
-                                Text(
-                                    subject,
-                                    color = DeepBlue
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(22.dp))
-
-            Button(
-                onClick = onProceed,
-
-                enabled = !isLoading &&
-                        !isFindingSubjects &&
-                        subjectsLoaded &&
-                        subjects.isNotEmpty(),
-
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-
-                shape = RoundedCornerShape(15.dp),
-
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DeepBlue
-                )
-            ) {
-
-                if (isLoading) {
-
-                    CircularProgressIndicator(
-                        Modifier.size(22.dp),
-                        color = White,
-                        strokeWidth = 2.dp
-                    )
-
-                } else {
-
-                    Text(
-                        "Proceed",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(28.dp))
-        }
-    }
-}
-
-// QHUB LOGO
+// ----------------------------------------------------
+// QHUB LOGO - CAP DIRECTLY ABOVE Q
+// ----------------------------------------------------
 
 @Composable
 fun QHubLogo() {
@@ -1148,7 +420,6 @@ fun QHubLogo() {
         modifier = Modifier
             .fillMaxWidth()
             .height(135.dp),
-
         contentAlignment = Alignment.Center
     ) {
 
@@ -1157,10 +428,14 @@ fun QHubLogo() {
             horizontalArrangement = Arrangement.Center
         ) {
 
-            Box(Modifier.wrapContentSize()) {
+            // Q and cap are in the same Box.
+            // This makes the cap align with Q instead of the whole logo.
+            Box(
+                modifier = Modifier.wrapContentSize()
+            ) {
 
                 Text(
-                    "Q",
+                    text = "Q",
                     fontSize = 82.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = DeepBlue,
@@ -1168,7 +443,7 @@ fun QHubLogo() {
                 )
 
                 Canvas(
-                    Modifier
+                    modifier = Modifier
                         .width(52.dp)
                         .height(38.dp)
                         .align(Alignment.TopCenter)
@@ -1178,6 +453,7 @@ fun QHubLogo() {
                     val w = size.width
                     val h = size.height
 
+                    // Diamond top of graduation cap
                     val capTop = Path().apply {
                         moveTo(w * 0.02f, h * 0.42f)
                         lineTo(w * 0.52f, h * 0.08f)
@@ -1186,8 +462,12 @@ fun QHubLogo() {
                         close()
                     }
 
-                    drawPath(capTop, DeepBlue)
+                    drawPath(
+                        path = capTop,
+                        color = DeepBlue
+                    )
 
+                    // Cap base
                     drawRoundRect(
                         color = DeepBlue,
                         topLeft = Offset(
@@ -1201,6 +481,7 @@ fun QHubLogo() {
                         cornerRadius = CornerRadius(4.dp.toPx())
                     )
 
+                    // Tassel cord
                     drawLine(
                         color = Beige,
                         start = Offset(
@@ -1214,6 +495,7 @@ fun QHubLogo() {
                         strokeWidth = 2.dp.toPx()
                     )
 
+                    // Tassel end
                     drawCircle(
                         color = Beige,
                         radius = 3.dp.toPx(),
@@ -1225,8 +507,9 @@ fun QHubLogo() {
                 }
             }
 
+            // Remaining letters
             Text(
-                "Hub",
+                text = "Hub",
                 fontSize = 82.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = DeepBlue,
@@ -1236,47 +519,65 @@ fun QHubLogo() {
     }
 }
 
+// ----------------------------------------------------
 // BACKGROUND PATTERN
+// ----------------------------------------------------
 
 @Composable
 fun QHubBackgroundPattern() {
 
-    Canvas(Modifier.fillMaxSize()) {
+    Canvas(
+        modifier = Modifier.fillMaxSize()
+    ) {
 
         val w = size.width
         val h = size.height
 
+        // Top-left soft circular pattern
         drawCircle(
-            LightBeige,
-            100.dp.toPx(),
-            Offset(-15.dp.toPx(), 30.dp.toPx())
+            color = LightBeige,
+            radius = 100.dp.toPx(),
+            center = Offset(
+                -15.dp.toPx(),
+                30.dp.toPx()
+            )
         )
 
         drawCircle(
-            White,
-            72.dp.toPx(),
-            Offset(-10.dp.toPx(), 30.dp.toPx())
+            color = White,
+            radius = 72.dp.toPx(),
+            center = Offset(
+                -10.dp.toPx(),
+                30.dp.toPx()
+            )
+        )
+
+        // Bottom-right soft pattern
+        drawCircle(
+            color = LightBeige,
+            radius = 115.dp.toPx(),
+            center = Offset(
+                w + 30.dp.toPx(),
+                h - 15.dp.toPx()
+            )
         )
 
         drawCircle(
-            LightBeige,
-            115.dp.toPx(),
-            Offset(w + 30.dp.toPx(), h - 15.dp.toPx())
+            color = White,
+            radius = 82.dp.toPx(),
+            center = Offset(
+                w + 25.dp.toPx(),
+                h - 15.dp.toPx()
+            )
         )
 
-        drawCircle(
-            White,
-            82.dp.toPx(),
-            Offset(w + 25.dp.toPx(), h - 15.dp.toPx())
-        )
-
+        // Small decorative dots
         for (i in 0..3) {
             for (j in 0..3) {
 
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
-
                     center = Offset(
                         w - 58.dp.toPx() + i * 12.dp.toPx(),
                         55.dp.toPx() + j * 12.dp.toPx()
@@ -1287,7 +588,9 @@ fun QHubBackgroundPattern() {
     }
 }
 
+// ----------------------------------------------------
 // ROLE BUTTON
+// ----------------------------------------------------
 
 @Composable
 fun RoleButton(
@@ -1299,30 +602,28 @@ fun RoleButton(
 
     Button(
         onClick = onClick,
-
         modifier = modifier.height(50.dp),
-
         shape = RoundedCornerShape(14.dp),
-
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) DeepBlue else White,
             contentColor = if (selected) White else DeepBlue
         ),
-
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp
         )
     ) {
 
         Text(
-            text,
+            text = text,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold
         )
     }
 }
 
+// ----------------------------------------------------
 // TEXT FIELD
+// ----------------------------------------------------
 
 @Composable
 fun QHubTextField(
@@ -1336,32 +637,27 @@ fun QHubTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-
         modifier = Modifier.fillMaxWidth(),
-
         label = {
             Text(
-                label,
+                text = label,
                 color = BlueGray
             )
         },
-
         singleLine = true,
-
         shape = RoundedCornerShape(14.dp),
-
         keyboardOptions = KeyboardOptions(
-            keyboardType = if (isPassword)
+            keyboardType = if (isPassword) {
                 KeyboardType.Password
-            else
+            } else {
                 keyboardType
+            }
         ),
-
-        visualTransformation = if (isPassword)
+        visualTransformation = if (isPassword) {
             PasswordVisualTransformation()
-        else
-            VisualTransformation.None,
-
+        } else {
+            VisualTransformation.None
+        },
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = DeepBlue,
             unfocusedBorderColor = Beige,
