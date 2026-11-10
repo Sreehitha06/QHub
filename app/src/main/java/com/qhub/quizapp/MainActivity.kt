@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
-import com.qhub.quizapp.student.StudentDashboard
 
 private val White = Color(0xFFFFFFFF)
 private val Beige = Color(0xFFE6D5C3)
@@ -54,7 +53,7 @@ class MainActivity : ComponentActivity() {
                     surface = White
                 )
             ) {
-                StudentDashboard()
+                QHubLoginScreen()
             }
         }
     }
@@ -62,13 +61,10 @@ class MainActivity : ComponentActivity() {
 
 // ----------------------------------------------------
 // MAIN LOGIN SCREEN
-// Preserved for Sahasra's future integration
 // ----------------------------------------------------
 
 @Composable
-fun QHubLoginScreen(
-    onLoginSuccess: (String) -> Unit = {}
-) {
+fun QHubLoginScreen() {
 
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
@@ -99,6 +95,7 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // QHub logo
             QHubLogo()
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -113,7 +110,11 @@ fun QHubLoginScreen(
             Spacer(modifier = Modifier.height(30.dp))
 
             Text(
-                text = if (isRegistering) "Create Account" else "Welcome Back!",
+                text = if (isRegistering) {
+                    "Create Account"
+                } else {
+                    "Welcome Back!"
+                },
                 fontSize = 27.sp,
                 fontWeight = FontWeight.Bold,
                 color = DeepBlue
@@ -134,12 +135,13 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // ROLE SELECTOR
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
-                        LightBeige,
-                        RoundedCornerShape(22.dp)
+                        color = LightBeige,
+                        shape = RoundedCornerShape(22.dp)
                     )
                     .padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -180,6 +182,7 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(22.dp))
 
+            // NAME FIELD FOR REGISTRATION
             if (isRegistering) {
 
                 QHubTextField(
@@ -191,6 +194,7 @@ fun QHubLoginScreen(
                 Spacer(modifier = Modifier.height(15.dp))
             }
 
+            // EMAIL FIELD
             QHubTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -200,6 +204,7 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(15.dp))
 
+            // PASSWORD FIELD
             QHubTextField(
                 value = password,
                 onValueChange = { password = it },
@@ -209,6 +214,7 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(25.dp))
 
+            // LOGIN / REGISTER BUTTON
             Button(
                 onClick = {
 
@@ -218,6 +224,7 @@ fun QHubLoginScreen(
                             "Please enter email and password",
                             Toast.LENGTH_SHORT
                         ).show()
+
                         return@Button
                     }
 
@@ -227,6 +234,7 @@ fun QHubLoginScreen(
                             "Please enter your name",
                             Toast.LENGTH_SHORT
                         ).show()
+
                         return@Button
                     }
 
@@ -253,6 +261,7 @@ fun QHubLoginScreen(
                                 user?.updateProfile(profileUpdates)
 
                                 user?.uid?.let { uid ->
+
                                     context.getSharedPreferences(
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
@@ -266,8 +275,6 @@ fun QHubLoginScreen(
                                     "Registration successful! Welcome $selectedRole",
                                     Toast.LENGTH_SHORT
                                 ).show()
-
-                                onLoginSuccess(selectedRole)
 
                             } else {
 
@@ -306,13 +313,12 @@ fun QHubLoginScreen(
                                     Toast.LENGTH_SHORT
                                 ).show()
 
-                                onLoginSuccess(savedRole)
-
                             } else {
 
                                 Toast.makeText(
                                     context,
-                                    task.exception?.message ?: "Login failed",
+                                    task.exception?.message
+                                        ?: "Login failed",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -353,6 +359,7 @@ fun QHubLoginScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
+            // SWITCH BETWEEN LOGIN AND REGISTRATION
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -376,7 +383,11 @@ fun QHubLoginScreen(
                 ) {
 
                     Text(
-                        text = if (isRegistering) "Login" else "Register",
+                        text = if (isRegistering) {
+                            "Login"
+                        } else {
+                            "Register"
+                        },
                         color = DeepBlue,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -399,7 +410,7 @@ fun QHubLoginScreen(
 }
 
 // ----------------------------------------------------
-// QHUB LOGO
+// QHUB LOGO - CAP DIRECTLY ABOVE Q
 // ----------------------------------------------------
 
 @Composable
@@ -417,7 +428,11 @@ fun QHubLogo() {
             horizontalArrangement = Arrangement.Center
         ) {
 
-            Box(modifier = Modifier.wrapContentSize()) {
+            // Q and cap are in the same Box.
+            // This makes the cap align with Q instead of the whole logo.
+            Box(
+                modifier = Modifier.wrapContentSize()
+            ) {
 
                 Text(
                     text = "Q",
@@ -438,6 +453,7 @@ fun QHubLogo() {
                     val w = size.width
                     val h = size.height
 
+                    // Diamond top of graduation cap
                     val capTop = Path().apply {
                         moveTo(w * 0.02f, h * 0.42f)
                         lineTo(w * 0.52f, h * 0.08f)
@@ -451,28 +467,47 @@ fun QHubLogo() {
                         color = DeepBlue
                     )
 
+                    // Cap base
                     drawRoundRect(
                         color = DeepBlue,
-                        topLeft = Offset(w * 0.28f, h * 0.46f),
-                        size = Size(w * 0.48f, h * 0.25f),
+                        topLeft = Offset(
+                            w * 0.28f,
+                            h * 0.46f
+                        ),
+                        size = Size(
+                            w * 0.48f,
+                            h * 0.25f
+                        ),
                         cornerRadius = CornerRadius(4.dp.toPx())
                     )
 
+                    // Tassel cord
                     drawLine(
                         color = Beige,
-                        start = Offset(w * 0.96f, h * 0.42f),
-                        end = Offset(w * 0.91f, h * 0.82f),
+                        start = Offset(
+                            w * 0.96f,
+                            h * 0.42f
+                        ),
+                        end = Offset(
+                            w * 0.91f,
+                            h * 0.82f
+                        ),
                         strokeWidth = 2.dp.toPx()
                     )
 
+                    // Tassel end
                     drawCircle(
                         color = Beige,
                         radius = 3.dp.toPx(),
-                        center = Offset(w * 0.91f, h * 0.85f)
+                        center = Offset(
+                            w * 0.91f,
+                            h * 0.85f
+                        )
                     )
                 }
             }
 
+            // Remaining letters
             Text(
                 text = "Hub",
                 fontSize = 82.sp,
@@ -491,23 +526,33 @@ fun QHubLogo() {
 @Composable
 fun QHubBackgroundPattern() {
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
+    Canvas(
+        modifier = Modifier.fillMaxSize()
+    ) {
 
         val w = size.width
         val h = size.height
 
+        // Top-left soft circular pattern
         drawCircle(
             color = LightBeige,
             radius = 100.dp.toPx(),
-            center = Offset(-15.dp.toPx(), 30.dp.toPx())
+            center = Offset(
+                -15.dp.toPx(),
+                30.dp.toPx()
+            )
         )
 
         drawCircle(
             color = White,
             radius = 72.dp.toPx(),
-            center = Offset(-10.dp.toPx(), 30.dp.toPx())
+            center = Offset(
+                -10.dp.toPx(),
+                30.dp.toPx()
+            )
         )
 
+        // Bottom-right soft pattern
         drawCircle(
             color = LightBeige,
             radius = 115.dp.toPx(),
@@ -526,8 +571,10 @@ fun QHubBackgroundPattern() {
             )
         )
 
+        // Small decorative dots
         for (i in 0..3) {
             for (j in 0..3) {
+
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
