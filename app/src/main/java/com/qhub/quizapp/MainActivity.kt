@@ -4,6 +4,7 @@ package com.qhub.quizapp
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
+import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -70,7 +71,6 @@ class MainActivity : ComponentActivity() {
                     outline = Beige
                 )
             ) {
-
                 QHubLoginScreen()
             }
         }
@@ -87,10 +87,7 @@ fun QHubLoginScreen() {
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
 
-    // TEMPORARY FIREBASE SESSION CHECK
-
     LaunchedEffect(Unit) {
-
         Log.d(
             "QHubLogin",
             "Current Firebase User: ${auth.currentUser?.email}"
@@ -292,7 +289,11 @@ fun QHubLoginScreen() {
 
             QHubTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = {
+                    email = it
+                        .filterNot { char -> char.isWhitespace() }
+                        .lowercase()
+                },
                 label = "Email Address",
                 keyboardType = KeyboardType.Email
             )
@@ -315,14 +316,32 @@ fun QHubLoginScreen() {
             Button(
                 onClick = {
 
+                    val normalizedEmail = email
+                        .trim()
+                        .lowercase()
+
                     if (
-                        email.isBlank() ||
+                        normalizedEmail.isBlank() ||
                         password.isBlank()
                     ) {
 
                         Toast.makeText(
                             context,
                             "Please enter email and password",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        return@Button
+                    }
+
+                    if (!Patterns.EMAIL_ADDRESS.matcher(
+                            normalizedEmail
+                        ).matches()
+                    ) {
+
+                        Toast.makeText(
+                            context,
+                            "Please enter a valid email address",
                             Toast.LENGTH_SHORT
                         ).show()
 
@@ -350,7 +369,7 @@ fun QHubLoginScreen() {
                         // FIREBASE REGISTRATION
 
                         auth.createUserWithEmailAndPassword(
-                            email.trim(),
+                            normalizedEmail,
                             password
                         ).addOnCompleteListener { task ->
 
@@ -405,7 +424,7 @@ fun QHubLoginScreen() {
                         // FIREBASE LOGIN
 
                         auth.signInWithEmailAndPassword(
-                            email.trim(),
+                            normalizedEmail,
                             password
                         ).addOnCompleteListener { task ->
 
@@ -435,7 +454,7 @@ fun QHubLoginScreen() {
                                             ?: "Teacher"
 
                                     teacherEmail =
-                                        user?.email ?: email
+                                        user?.email ?: normalizedEmail
 
                                     showTeacherDashboard = true
 
@@ -457,6 +476,12 @@ fun QHubLoginScreen() {
                                 }
 
                             } else {
+
+                                Log.e(
+                                    "QHubLogin",
+                                    "Login failed for: $normalizedEmail",
+                                    task.exception
+                                )
 
                                 Toast.makeText(
                                     context,
