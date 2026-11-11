@@ -1,10 +1,7 @@
-
 package com.qhub.quizapp
 
 import android.content.Context
 import android.os.Bundle
-import android.util.Log
-import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -71,6 +68,7 @@ class MainActivity : ComponentActivity() {
                     outline = Beige
                 )
             ) {
+
                 QHubLoginScreen()
             }
         }
@@ -86,13 +84,6 @@ fun QHubLoginScreen() {
 
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
-
-    LaunchedEffect(Unit) {
-        Log.d(
-            "QHubLogin",
-            "Current Firebase User: ${auth.currentUser?.email}"
-        )
-    }
 
     var selectedRole by remember {
         mutableStateOf("Student")
@@ -132,13 +123,13 @@ fun QHubLoginScreen() {
         mutableStateOf("")
     }
 
-    // ------------------------------------------------
-    // TEACHER DASHBOARD
-    // ------------------------------------------------
+    // Show teacher dashboard after successful login
 
     if (showTeacherDashboard) {
 
         TeacherDashboard(
+            teacherName = teacherName,
+            teacherEmail = auth.currentUser?.email ?: teacherEmail,
             onLogout = {
 
                 auth.signOut()
@@ -162,9 +153,7 @@ fun QHubLoginScreen() {
         return
     }
 
-    // ------------------------------------------------
     // LOGIN SCREEN UI
-    // ------------------------------------------------
 
     Box(
         modifier = Modifier
@@ -289,11 +278,7 @@ fun QHubLoginScreen() {
 
             QHubTextField(
                 value = email,
-                onValueChange = {
-                    email = it
-                        .filterNot { char -> char.isWhitespace() }
-                        .lowercase()
-                },
+                onValueChange = { email = it },
                 label = "Email Address",
                 keyboardType = KeyboardType.Email
             )
@@ -316,32 +301,14 @@ fun QHubLoginScreen() {
             Button(
                 onClick = {
 
-                    val normalizedEmail = email
-                        .trim()
-                        .lowercase()
-
                     if (
-                        normalizedEmail.isBlank() ||
+                        email.isBlank() ||
                         password.isBlank()
                     ) {
 
                         Toast.makeText(
                             context,
                             "Please enter email and password",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
-                        return@Button
-                    }
-
-                    if (!Patterns.EMAIL_ADDRESS.matcher(
-                            normalizedEmail
-                        ).matches()
-                    ) {
-
-                        Toast.makeText(
-                            context,
-                            "Please enter a valid email address",
                             Toast.LENGTH_SHORT
                         ).show()
 
@@ -369,7 +336,7 @@ fun QHubLoginScreen() {
                         // FIREBASE REGISTRATION
 
                         auth.createUserWithEmailAndPassword(
-                            normalizedEmail,
+                            email.trim(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -405,6 +372,8 @@ fun QHubLoginScreen() {
                                     Toast.LENGTH_LONG
                                 ).show()
 
+                                // Return to login screen
+
                                 isRegistering = false
                                 name = ""
 
@@ -424,7 +393,7 @@ fun QHubLoginScreen() {
                         // FIREBASE LOGIN
 
                         auth.signInWithEmailAndPassword(
-                            normalizedEmail,
+                            email.trim(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -433,6 +402,7 @@ fun QHubLoginScreen() {
                             if (task.isSuccessful) {
 
                                 val user = auth.currentUser
+
                                 val uid = user?.uid
 
                                 val savedRole = uid?.let {
@@ -454,7 +424,7 @@ fun QHubLoginScreen() {
                                             ?: "Teacher"
 
                                     teacherEmail =
-                                        user?.email ?: normalizedEmail
+                                        user?.email ?: email
 
                                     showTeacherDashboard = true
 
@@ -466,6 +436,8 @@ fun QHubLoginScreen() {
 
                                 } else {
 
+                                    // Student dashboard will be developed separately.
+
                                     auth.signOut()
 
                                     Toast.makeText(
@@ -476,12 +448,6 @@ fun QHubLoginScreen() {
                                 }
 
                             } else {
-
-                                Log.e(
-                                    "QHubLogin",
-                                    "Login failed for: $normalizedEmail",
-                                    task.exception
-                                )
 
                                 Toast.makeText(
                                     context,
@@ -593,6 +559,7 @@ fun QHubLogo() {
         modifier = Modifier
             .fillMaxWidth()
             .height(135.dp),
+
         contentAlignment = Alignment.Center
     ) {
 
@@ -742,6 +709,7 @@ fun QHubBackgroundPattern() {
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
+
                     center = Offset(
                         w - 58.dp.toPx() + i * 12.dp.toPx(),
                         55.dp.toPx() + j * 12.dp.toPx()
@@ -766,12 +734,16 @@ fun RoleButton(
 
     Button(
         onClick = onClick,
+
         modifier = modifier.height(50.dp),
+
         shape = RoundedCornerShape(14.dp),
+
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) DeepBlue else White,
             contentColor = if (selected) White else DeepBlue
         ),
+
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp
         )
@@ -801,15 +773,20 @@ fun QHubTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
+
         modifier = Modifier.fillMaxWidth(),
+
         label = {
             Text(
                 text = label,
                 color = BlueGray
             )
         },
+
         singleLine = true,
+
         shape = RoundedCornerShape(14.dp),
+
         keyboardOptions = KeyboardOptions(
             keyboardType = if (isPassword) {
                 KeyboardType.Password
@@ -817,11 +794,13 @@ fun QHubTextField(
                 keyboardType
             }
         ),
+
         visualTransformation = if (isPassword) {
             PasswordVisualTransformation()
         } else {
             VisualTransformation.None
         },
+
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = DeepBlue,
             unfocusedBorderColor = Beige,

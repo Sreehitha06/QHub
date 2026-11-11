@@ -1,0 +1,718 @@
+
+package com.qhub.quizapp.student
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.qhub.quizapp.data.SemesterRepository
+import com.qhub.quizapp.data.StudentQuizRepository
+import com.qhub.quizapp.data.StudentQuizRecord
+
+private val Cream = Color(0xFFF0EEE8)
+private val Taupe = Color(0xFFB1A496)
+private val BlueGray = Color(0xFF6F8B9B)
+private val DeepBlue = Color(0xFF2B4C63)
+private val White = Color(0xFFFFFFFF)
+
+@Composable
+fun StudentDashboard(
+    onLogout: () -> Unit = {
+        FirebaseAuth.getInstance().signOut()
+    }
+) {
+    var currentScreen by remember { mutableStateOf("dashboard") }
+    var profileMenuExpanded by remember { mutableStateOf(false) }
+    var showEditMessage by remember { mutableStateOf(false) }
+
+    var selectedRecord by remember {
+        mutableStateOf<StudentQuizRecord?>(null)
+    }
+
+    var submittedAnswers by remember {
+        mutableStateOf<List<Int>>(emptyList())
+    }
+
+    var showQuizUnavailableDialog by remember {
+        mutableStateOf(false)
+    }
+
+    val activeSemester = SemesterRepository.getActiveSemester()
+    val archivedSemesters = SemesterRepository.getArchivedSemesters()
+
+    when (currentScreen) {
+
+        // SEMESTER SCREEN
+        "semester" -> {
+            PatternBackground {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp)
+                ) {
+                    BackButton {
+                        currentScreen = "dashboard"
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Text(
+                        "Semester",
+                        fontSize = 25.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepBlue
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Text(
+                        "Current Semester ${activeSemester.semesterNumber}",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepBlue
+                    )
+
+                    Spacer(Modifier.height(12.dp))
+
+                    if (activeSemester.subjects.isEmpty()) {
+                        EmptyMessage("No subjects assigned yet.")
+                    } else {
+                        activeSemester.subjects.forEach { subject ->
+                            InfoCard(subject.subjectName)
+                        }
+                    }
+
+                    if (archivedSemesters.isNotEmpty()) {
+                        Spacer(Modifier.height(24.dp))
+
+                        Text(
+                            "Previous Semesters",
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepBlue
+                        )
+
+                        archivedSemesters.forEach { semester ->
+                            Spacer(Modifier.height(10.dp))
+
+                            InfoCard(
+                                title = "Semester ${semester.semesterNumber}",
+                                subtitle = "${semester.subjects.size} subjects"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ATTEMPTED QUIZZES
+        "attempted" -> {
+            StudentQuizListScreen(
+                title = "Attempted Quizzes",
+                quizzes = StudentQuizRepository.getAttemptedQuizzes(),
+                showMarks = true,
+                onBack = {
+                    currentScreen = "dashboard"
+                }
+            )
+        }
+
+        // UNATTEMPTED QUIZZES
+        "unattempted" -> {
+            StudentQuizListScreen(
+                title = "Unattempted Quizzes",
+                quizzes = StudentQuizRepository.getUnattemptedQuizzes(),
+                onBack = {
+                    currentScreen = "dashboard"
+                }
+            )
+        }
+
+        // UPCOMING QUIZZES
+        "upcoming" -> {
+            StudentQuizListScreen(
+                title = "Upcoming Quizzes",
+                quizzes = StudentQuizRepository.getUpcomingQuizzes(),
+                showSchedule = true,
+                onBack = {
+                    currentScreen = "dashboard"
+                },
+                onAttemptQuiz = { record ->
+                    if (record.quiz != null) {
+                        selectedRecord = record
+                        currentScreen = "instructions"
+                    } else {
+                        showQuizUnavailableDialog = true
+                    }
+                }
+            )
+        }
+
+        // QUIZ INSTRUCTIONS
+        "instructions" -> {
+            val quiz = selectedRecord?.quiz
+
+            if (quiz != null) {
+                QuizInstructions(
+                    quiz = quiz,
+                    onStartQuiz = {
+                        currentScreen = "quiz"
+                    }
+                )
+            } else {
+                currentScreen = "upcoming"
+            }
+        }
+
+        // QUIZ SCREEN
+        "quiz" -> {
+            val quiz = selectedRecord?.quiz
+
+            if (quiz != null) {
+                QuizScreen(
+                    quiz = quiz,
+                    onSubmit = { answers ->
+                        submittedAnswers = answers
+
+                        val marks = quiz.questions.indices.count { index ->
+                            answers.getOrNull(index) ==
+                                    quiz.questions[index].correctAnswerIndex
+                        }
+
+                        selectedRecord?.let { record ->
+                            StudentQuizRepository.saveAttemptedQuiz(
+                                record.copy(
+                                    marksObtained = marks,
+                                    totalMarks = quiz.questions.size
+                                )
+                            )
+                        }
+
+                        currentScreen = "result"
+                    }
+                )
+            } else {
+                currentScreen = "upcoming"
+            }
+        }
+
+        // QUIZ RESULT
+        "result" -> {
+            val quiz = selectedRecord?.quiz
+
+            if (quiz != null) {
+                QuizResultScreen(
+                    quiz = quiz,
+                    answers = submittedAnswers,
+                    onBackToDashboard = {
+                        selectedRecord = null
+                        submittedAnswers = emptyList()
+                        currentScreen = "dashboard"
+                    }
+                )
+            } else {
+                currentScreen = "dashboard"
+            }
+        }
+
+        // MAIN DASHBOARD
+        else -> {
+            PatternBackground {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+                    // HEADER AND PROFILE MENU
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(68.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "QHub",
+                            fontSize = 40.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = DeepBlue
+                        )
+
+                        Box(
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    profileMenuExpanded = true
+                                },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(
+                                        DeepBlue,
+                                        CircleShape
+                                    )
+                            ) {
+                                ProfileIcon()
+                            }
+
+                            // PROFILE MENU
+                            DropdownMenu(
+                                expanded = profileMenuExpanded,
+                                onDismissRequest = {
+                                    profileMenuExpanded = false
+                                }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Edit",
+                                            color = DeepBlue
+                                        )
+                                    },
+                                    onClick = {
+                                        profileMenuExpanded = false
+                                        showEditMessage = true
+                                    }
+                                )
+
+                                HorizontalDivider()
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Log Out",
+                                            color = Color.Red
+                                        )
+                                    },
+                                    onClick = {
+                                        profileMenuExpanded = false
+                                        onLogout()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(30.dp))
+
+                    Text(
+                        "Hello, Student!",
+                        fontSize = 25.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepBlue,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Text(
+                        "Ready to test your knowledge?",
+                        fontSize = 16.sp,
+                        color = BlueGray,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(85.dp))
+
+                    DashboardButton("Semester") {
+                        currentScreen = "semester"
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+
+                    DashboardButton("Attempted Quizzes") {
+                        currentScreen = "attempted"
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+
+                    DashboardButton("Unattempted Quizzes") {
+                        currentScreen = "unattempted"
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+
+                    DashboardButton("Upcoming Quizzes") {
+                        currentScreen = "upcoming"
+                    }
+                }
+            }
+        }
+    }
+
+    // EDIT PROFILE MESSAGE
+    if (showEditMessage) {
+        AlertDialog(
+            onDismissRequest = {
+                showEditMessage = false
+            },
+            title = {
+                Text("Edit Profile")
+            },
+            text = {
+                Text(
+                    "Your profile editing page will be connected " +
+                            "after Sahasra's registration module is integrated."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEditMessage = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    // QUIZ NOT AVAILABLE MESSAGE
+    if (showQuizUnavailableDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showQuizUnavailableDialog = false
+            },
+            title = {
+                Text("Quiz not ready")
+            },
+            text = {
+                Text("The quiz questions are not available yet.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showQuizUnavailableDialog = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+}
+
+// DECORATIVE BACKGROUND
+@Composable
+private fun PatternBackground(
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Cream)
+    ) {
+        Spacer(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+
+                    val patternColor = Taupe.copy(alpha = 0.55f)
+                    val ringWidth = 22.dp.toPx()
+
+                    // TOP LEFT RINGS
+                    drawCircle(
+                        color = patternColor,
+                        radius = 105.dp.toPx(),
+                        center = Offset(
+                            -45.dp.toPx(),
+                            -20.dp.toPx()
+                        ),
+                        style = Stroke(width = ringWidth)
+                    )
+
+                    drawCircle(
+                        color = patternColor,
+                        radius = 125.dp.toPx(),
+                        center = Offset(
+                            -45.dp.toPx(),
+                            -20.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    drawCircle(
+                        color = patternColor,
+                        radius = 145.dp.toPx(),
+                        center = Offset(
+                            -45.dp.toPx(),
+                            -20.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    // BOTTOM RIGHT RINGS
+                    drawCircle(
+                        color = patternColor,
+                        radius = 85.dp.toPx(),
+                        center = Offset(
+                            size.width + 45.dp.toPx(),
+                            size.height + 15.dp.toPx()
+                        ),
+                        style = Stroke(width = ringWidth)
+                    )
+
+                    drawCircle(
+                        color = patternColor,
+                        radius = 110.dp.toPx(),
+                        center = Offset(
+                            size.width + 45.dp.toPx(),
+                            size.height + 15.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    drawCircle(
+                        color = patternColor,
+                        radius = 130.dp.toPx(),
+                        center = Offset(
+                            size.width + 45.dp.toPx(),
+                            size.height + 15.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    // TOP RIGHT DOTS
+                    for (row in 0..4) {
+                        for (column in 0..4) {
+                            drawCircle(
+                                color = patternColor,
+                                radius = 2.5.dp.toPx(),
+                                center = Offset(
+                                    size.width - 55.dp.toPx() +
+                                            column * 9.dp.toPx(),
+                                    45.dp.toPx() +
+                                            row * 9.dp.toPx()
+                                )
+                            )
+                        }
+                    }
+
+                    // BOTTOM LEFT CIRCLES
+                    for (i in 0..3) {
+                        drawCircle(
+                            color = patternColor,
+                            radius = (5 + i * 3).dp.toPx(),
+                            center = Offset(
+                                25.dp.toPx() + i * 18.dp.toPx(),
+                                size.height - 45.dp.toPx()
+                            ),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+                    }
+
+                    // BOTTOM RIGHT DOTS
+                    for (row in 0..3) {
+                        for (column in 0..3) {
+                            drawCircle(
+                                color = patternColor,
+                                radius = 2.dp.toPx(),
+                                center = Offset(
+                                    size.width - 30.dp.toPx() -
+                                            column * 10.dp.toPx(),
+                                    size.height - 100.dp.toPx() +
+                                            row * 10.dp.toPx()
+                                )
+                            )
+                        }
+                    }
+
+                    // EXTRA TOP RIGHT RINGS
+                    drawCircle(
+                        color = patternColor,
+                        radius = 35.dp.toPx(),
+                        center = Offset(
+                            size.width - 10.dp.toPx(),
+                            125.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    drawCircle(
+                        color = patternColor,
+                        radius = 48.dp.toPx(),
+                        center = Offset(
+                            size.width - 10.dp.toPx(),
+                            125.dp.toPx()
+                        ),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+
+                    // CENTER LEFT DOTS
+                    for (row in 0..2) {
+                        for (column in 0..2) {
+                            drawCircle(
+                                color = patternColor,
+                                radius = 2.dp.toPx(),
+                                center = Offset(
+                                    15.dp.toPx() +
+                                            column * 10.dp.toPx(),
+                                    size.height * 0.55f +
+                                            row * 10.dp.toPx()
+                                )
+                            )
+                        }
+                    }
+                }
+        )
+
+        content()
+    }
+}
+
+// PROFILE ICON
+@Composable
+private fun ProfileIcon() {
+    Canvas(
+        modifier = Modifier.size(27.dp)
+    ) {
+        val strokeWidth = 2.dp.toPx()
+
+        drawCircle(
+            color = White,
+            radius = size.width * 0.16f,
+            center = Offset(
+                size.width / 2,
+                size.height * 0.30f
+            )
+        )
+
+        drawArc(
+            color = White,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(
+                size.width * 0.16f,
+                size.height * 0.43f
+            ),
+            size = androidx.compose.ui.geometry.Size(
+                size.width * 0.68f,
+                size.height * 0.65f
+            ),
+            style = Stroke(width = strokeWidth)
+        )
+    }
+}
+
+// DASHBOARD BUTTON
+@Composable
+private fun DashboardButton(
+    title: String,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth(0.82f)
+            .height(62.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = DeepBlue,
+            contentColor = White
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 3.dp
+        )
+    ) {
+        Text(
+            title,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = White
+        )
+    }
+}
+
+// BACK BUTTON
+@Composable
+private fun BackButton(
+    onClick: () -> Unit
+) {
+    TextButton(onClick = onClick) {
+        Text(
+            "← Back",
+            color = DeepBlue,
+            fontSize = 16.sp
+        )
+    }
+}
+
+// INFORMATION CARD
+@Composable
+private fun InfoCard(
+    title: String,
+    subtitle: String = ""
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = White
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = DeepBlue
+            )
+
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    fontSize = 13.sp,
+                    color = BlueGray
+                )
+            }
+        }
+    }
+}
+
+// EMPTY MESSAGE
+@Composable
+private fun EmptyMessage(
+    message: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = White
+        )
+    ) {
+        Text(
+            message,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(22.dp),
+            color = BlueGray,
+            textAlign = TextAlign.Center,
+            fontSize = 14.sp
+        )
+    }
+}
