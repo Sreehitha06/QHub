@@ -21,11 +21,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
-import com.qhub.quizapp.data.SemesterRepository
+import com.qhub.quizapp.StudentDetails
+import com.qhub.quizapp.StudentEnrollment
+import com.qhub.quizapp.StudentRepository
 import com.qhub.quizapp.data.StudentQuizRepository
 import com.qhub.quizapp.data.StudentQuizRecord
-import com.qhub.quizapp.StudentDetails
-import com.qhub.quizapp.StudentRepository
 
 private val Cream = Color(0xFFF0EEE8)
 private val Taupe = Color(0xFFB1A496)
@@ -55,8 +55,42 @@ fun StudentDashboard(
         mutableStateOf(false)
     }
 
-    val activeSemester = SemesterRepository.getActiveSemester()
-    val archivedSemesters = SemesterRepository.getArchivedSemesters()
+    // Firebase subject enrollment states
+    var studentEnrollments by remember {
+        mutableStateOf<List<StudentEnrollment>>(emptyList())
+    }
+
+    var subjectsLoading by remember {
+        mutableStateOf(false)
+    }
+
+    var subjectsError by remember {
+        mutableStateOf("")
+    }
+
+    val studentRepository = remember {
+        StudentRepository()
+    }
+
+    // Fetch subjects whenever the student opens the Semester screen.
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == "semester") {
+            subjectsLoading = true
+            subjectsError = ""
+
+            studentRepository.getVerifiedStudentEnrollments(
+                onSuccess = { enrollments ->
+                    studentEnrollments = enrollments
+                    subjectsLoading = false
+                    subjectsError = ""
+                },
+                onFailure = { error ->
+                    subjectsLoading = false
+                    subjectsError = error
+                }
+            )
+        }
+    }
 
     when (currentScreen) {
 
@@ -79,7 +113,9 @@ fun StudentDashboard(
                         .verticalScroll(rememberScrollState())
                         .padding(20.dp)
                 ) {
-                    BackButton { currentScreen = "dashboard" }
+                    BackButton {
+                        currentScreen = "dashboard"
+                    }
 
                     Spacer(Modifier.height(20.dp))
 
@@ -93,38 +129,129 @@ fun StudentDashboard(
                     Spacer(Modifier.height(16.dp))
 
                     Text(
-                        "Current Semester ${activeSemester.semesterNumber}",
+                        "Your Assigned Subjects",
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         color = DeepBlue
                     )
 
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
 
-                    if (activeSemester.subjects.isEmpty()) {
-                        EmptyMessage("No subjects assigned yet.")
-                    } else {
-                        activeSemester.subjects.forEach { subject ->
-                            InfoCard(subject.subjectName)
+                    when {
+                        subjectsLoading -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(35.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = DeepBlue
+                                    )
+
+                                    Spacer(Modifier.height(12.dp))
+
+                                    Text(
+                                        "Loading your subjects...",
+                                        color = BlueGray,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
                         }
-                    }
 
-                    if (archivedSemesters.isNotEmpty()) {
-                        Spacer(Modifier.height(24.dp))
+                        subjectsError.isNotBlank() -> {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = White
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        subjectsError,
+                                        color = Color.Red,
+                                        textAlign = TextAlign.Center,
+                                        fontSize = 14.sp
+                                    )
 
-                        Text(
-                            "Previous Semesters",
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepBlue
-                        )
+                                    Spacer(Modifier.height(15.dp))
 
-                        archivedSemesters.forEach { semester ->
-                            Spacer(Modifier.height(10.dp))
-                            InfoCard(
-                                title = "Semester ${semester.semesterNumber}",
-                                subtitle = "${semester.subjects.size} subjects"
+                                    Button(
+                                        onClick = {
+                                            currentScreen = "dashboard"
+                                            // Reopening Semester triggers a fresh fetch.
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = DeepBlue
+                                        )
+                                    ) {
+                                        Text("Back to Dashboard")
+                                    }
+                                }
+                            }
+                        }
+
+                        studentEnrollments.isEmpty() -> {
+                            EmptyMessage(
+                                "No subjects have been assigned to your verified email ID yet."
                             )
+                        }
+
+                        else -> {
+                            val groupedEnrollments =
+                                studentEnrollments.groupBy {
+                                    it.semester.trim().ifBlank {
+                                        "Semester not specified"
+                                    }
+                                }
+
+                            groupedEnrollments.forEach { (semester, enrollments) ->
+
+                                Text(
+                                    semester.let {
+                                        if (it == "Semester not specified") {
+                                            it
+                                        } else {
+                                            "Semester $it"
+                                        }
+                                    },
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepBlue
+                                )
+
+                                Spacer(Modifier.height(10.dp))
+
+                                enrollments.forEach { enrollment ->
+
+                                    val subtitleParts = buildList {
+                                        if (enrollment.className.isNotBlank()) {
+                                            add(enrollment.className)
+                                        }
+
+                                        if (enrollment.teacherEmail.isNotBlank()) {
+                                            add("Teacher: ${enrollment.teacherEmail}")
+                                        }
+                                    }
+
+                                    InfoCard(
+                                        title = enrollment.subjectName,
+                                        subtitle = subtitleParts.joinToString(" • ")
+                                    )
+                                }
+
+                                Spacer(Modifier.height(18.dp))
+                            }
                         }
                     }
                 }
@@ -367,9 +494,11 @@ private fun StudentProfileScreen(
     onEdit: (StudentDetails) -> Unit
 ) {
     val uid = FirebaseAuth.getInstance().currentUser?.uid
+
     var studentDetails by remember {
         mutableStateOf<StudentDetails?>(null)
     }
+
     var loading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf("") }
 
@@ -518,12 +647,14 @@ private fun PatternBackground(
                         center = Offset(-45.dp.toPx(), -20.dp.toPx()),
                         style = Stroke(width = ringWidth)
                     )
+
                     drawCircle(
                         color = patternColor,
                         radius = 125.dp.toPx(),
                         center = Offset(-45.dp.toPx(), -20.dp.toPx()),
                         style = Stroke(width = 3.dp.toPx())
                     )
+
                     drawCircle(
                         color = patternColor,
                         radius = 145.dp.toPx(),
@@ -540,6 +671,7 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = ringWidth)
                     )
+
                     drawCircle(
                         color = patternColor,
                         radius = 110.dp.toPx(),
@@ -549,6 +681,7 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = 3.dp.toPx())
                     )
+
                     drawCircle(
                         color = patternColor,
                         radius = 130.dp.toPx(),
@@ -609,6 +742,7 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = 3.dp.toPx())
                     )
+
                     drawCircle(
                         color = patternColor,
                         radius = 48.dp.toPx(),
@@ -726,6 +860,8 @@ private fun InfoCard(
             )
 
             if (subtitle.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+
                 Text(
                     subtitle,
                     fontSize = 13.sp,

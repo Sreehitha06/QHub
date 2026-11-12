@@ -1,11 +1,14 @@
 
 package com.qhub.quizapp
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -30,7 +33,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.qhub.quizapp.student.StudentDashboard
 
@@ -137,11 +145,223 @@ fun QHubLoginScreen() {
         mutableStateOf("")
     }
 
-    // Stores existing student details while editing
-
     var editingStudentDetails by remember {
         mutableStateOf<StudentDetails?>(null)
     }
+
+    // ------------------------------------------------
+    // COMMON STUDENT LOGIN HANDLER
+    // ------------------------------------------------
+
+    fun openStudentAccount(user: FirebaseUser?) {
+
+        if (user == null) {
+
+            isLoading = false
+
+            Toast.makeText(
+                context,
+                "Unable to get student account",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            auth.signOut()
+            return
+        }
+
+        studentEmail = user.email ?: ""
+
+        if (studentEmail.isBlank()) {
+
+            isLoading = false
+
+            Toast.makeText(
+                context,
+                "Unable to retrieve your Google account email",
+                Toast.LENGTH_LONG
+            ).show()
+
+            auth.signOut()
+            return
+        }
+
+        // Save this account as a Student account.
+
+        context.getSharedPreferences(
+            "QHubPrefs",
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString("role_${user.uid}", "Student")
+            .apply()
+
+        isLoading = true
+
+        StudentRepository().getStudentDetails(
+
+            uid = user.uid,
+
+            onSuccess = {
+
+                isLoading = false
+
+                editingStudentDetails = null
+                showStudentDetails = false
+                showStudentDashboard = true
+
+                Toast.makeText(
+                    context,
+                    "Welcome back!",
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+
+            onFailure = { error ->
+
+                isLoading = false
+
+                if (error == "Student details not found.") {
+
+                    // First-time student login.
+                    // Open the existing student details page.
+
+                    editingStudentDetails = null
+                    showStudentDetails = true
+
+                } else {
+
+                    Toast.makeText(
+                        context,
+                        error,
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                    auth.signOut()
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------
+    // GOOGLE SIGN-IN CONFIGURATION
+    // ------------------------------------------------
+
+    val googleSignInClient = remember(context) {
+
+        val googleSignInOptions =
+            GoogleSignInOptions.Builder(
+                GoogleSignInOptions.DEFAULT_SIGN_IN
+            )
+                .requestIdToken(
+                    context.getString(R.string.default_web_client_id)
+                )
+                .requestEmail()
+                .build()
+
+        GoogleSignIn.getClient(
+            context,
+            googleSignInOptions
+        )
+    }
+
+    // ------------------------------------------------
+    // GOOGLE SIGN-IN RESULT
+    // ------------------------------------------------
+
+    val googleSignInLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+
+            if (result.resultCode == Activity.RESULT_OK) {
+
+                try {
+
+                    val accountTask =
+                        GoogleSignIn.getSignedInAccountFromIntent(
+                            result.data
+                        )
+
+                    val account = accountTask.getResult(
+                        ApiException::class.java
+                    )
+
+                    val idToken = account.idToken
+
+                    if (idToken.isNullOrBlank()) {
+
+                        isLoading = false
+
+                        Toast.makeText(
+                            context,
+                            "Google authentication token is missing",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                    } else {
+
+                        val credential =
+                            GoogleAuthProvider.getCredential(
+                                idToken,
+                                null
+                            )
+
+                        // Authenticate Google account with Firebase.
+
+                        auth.signInWithCredential(credential)
+                            .addOnCompleteListener { task ->
+
+                                if (task.isSuccessful) {
+
+                                    openStudentAccount(
+                                        auth.currentUser
+                                    )
+
+                                } else {
+
+                                    isLoading = false
+
+                                    Toast.makeText(
+                                        context,
+                                        task.exception?.message
+                                            ?: "Google login failed",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                    }
+
+                } catch (e: ApiException) {
+
+                    isLoading = false
+
+                    Toast.makeText(
+                        context,
+                        e.message ?: "Google Sign-In failed",
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                } catch (e: Exception) {
+
+                    isLoading = false
+
+                    Toast.makeText(
+                        context,
+                        e.message ?: "Something went wrong",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+
+            } else {
+
+                isLoading = false
+
+                Toast.makeText(
+                    context,
+                    "Google sign-in cancelled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
 
     // ------------------------------------------------
     // STUDENT DASHBOARD
@@ -172,8 +392,6 @@ fun QHubLoginScreen() {
                 ).show()
             },
 
-            // OPEN EDIT PROFILE
-
             onEditProfile = { details ->
 
                 editingStudentDetails = details
@@ -197,12 +415,7 @@ fun QHubLoginScreen() {
 
             email = studentEmail,
 
-            // If editing, existing details are prefilled.
-            // If first-time login, this will be null.
-
             existingDetails = editingStudentDetails,
-
-            // Cancel editing and return to dashboard.
 
             onBack = {
 
@@ -234,11 +447,9 @@ fun QHubLoginScreen() {
 
                     val repository = StudentRepository()
 
-                    // --------------------------------
-                    // EDIT EXISTING STUDENT PROFILE
-                    // --------------------------------
-
                     if (editingStudentDetails != null) {
+
+                        // EDIT EXISTING STUDENT PROFILE
 
                         repository.updateStudentDetails(
 
@@ -279,9 +490,7 @@ fun QHubLoginScreen() {
 
                     } else {
 
-                        // --------------------------------
                         // FIRST-TIME STUDENT DETAILS SAVE
-                        // --------------------------------
 
                         repository.verifyAndSaveStudent(
 
@@ -289,7 +498,14 @@ fun QHubLoginScreen() {
 
                             name = studentName,
                             rollNumber = roll,
-                            email = studentEmail,
+
+                            // USE THE CURRENT FIREBASE AUTHENTICATED EMAIL
+                            email = auth.currentUser
+                                ?.email
+                                ?.trim()
+                                ?.lowercase()
+                                .orEmpty(),
+
                             department = dept,
                             section = sec,
                             semester = sem,
@@ -594,7 +810,7 @@ fun QHubLoginScreen() {
 
                     } else {
 
-                        // FIREBASE LOGIN
+                        // FIREBASE EMAIL/PASSWORD LOGIN
 
                         auth.signInWithEmailAndPassword(
                             email.trim(),
@@ -639,67 +855,9 @@ fun QHubLoginScreen() {
 
                                 } else {
 
-                                    // STUDENT LOGIN
+                                    // STUDENT EMAIL/PASSWORD LOGIN
 
-                                    if (user == null) {
-
-                                        Toast.makeText(
-                                            context,
-                                            "Unable to get student account",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-
-                                        auth.signOut()
-
-                                        return@addOnCompleteListener
-                                    }
-
-                                    studentEmail =
-                                        user.email ?: email.trim()
-
-                                    isLoading = true
-
-                                    StudentRepository().getStudentDetails(
-
-                                        uid = user.uid,
-
-                                        onSuccess = {
-
-                                            isLoading = false
-
-                                            editingStudentDetails = null
-                                            showStudentDashboard = true
-
-                                            Toast.makeText(
-                                                context,
-                                                "Welcome back!",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        },
-
-                                        onFailure = { error ->
-
-                                            isLoading = false
-
-                                            if (
-                                                error == "Student details not found."
-                                            ) {
-
-                                                editingStudentDetails = null
-                                                showStudentDetails = true
-
-                                            } else {
-
-                                                Toast.makeText(
-                                                    context,
-                                                    error,
-                                                    Toast.LENGTH_LONG
-                                                ).show()
-
-                                                auth.signOut()
-                                            }
-                                        }
-                                    )
+                                    openStudentAccount(user)
                                 }
 
                             } else {
@@ -747,6 +905,99 @@ fun QHubLoginScreen() {
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+
+            // ------------------------------------------------
+            // GOOGLE SIGN-IN - STUDENTS ONLY
+            // ------------------------------------------------
+
+            if (
+                selectedRole == "Student" &&
+                !isRegistering
+            ) {
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = Beige
+                    )
+
+                    Text(
+                        text = "  OR  ",
+                        color = BlueGray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = Beige
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                OutlinedButton(
+                    onClick = {
+
+                        isLoading = true
+
+                        googleSignInLauncher.launch(
+                            googleSignInClient.signInIntent
+                        )
+                    },
+
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+
+                    shape = RoundedCornerShape(15.dp),
+
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = White,
+                        contentColor = DeepBlue
+                    ),
+
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        Beige
+                    ),
+
+                    enabled = !isLoading
+                ) {
+
+                    if (isLoading) {
+
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = DeepBlue,
+                            strokeWidth = 2.dp
+                        )
+
+                    } else {
+
+                        Text(
+                            text = "G",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepBlue
+                        )
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Text(
+                            text = "Continue with Google",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
