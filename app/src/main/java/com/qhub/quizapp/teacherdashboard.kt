@@ -66,7 +66,6 @@ fun TeacherDashboard(
     var showCsvUpload by remember { mutableStateOf(false) }
     var showCreateQuiz by remember { mutableStateOf(false) }
 
-    // NEW: MANAGE QUIZZES NAVIGATION STATE
     var showManageQuizzes by remember { mutableStateOf(false) }
 
     var teacherName by remember {
@@ -89,6 +88,11 @@ fun TeacherDashboard(
 
     var classesWithRoster by remember {
         mutableStateOf(setOf<String>())
+    }
+
+    // NEW: Subject and semester contexts grouped by class.
+    var rosterContextsByClass by remember {
+        mutableStateOf<Map<String, List<QHubRosterContext>>>(emptyMap())
     }
 
     var selectedTeacherClass by remember {
@@ -140,9 +144,47 @@ fun TeacherDashboard(
                         errorMessage = error.localizedMessage
                             ?: "Could not check uploaded CSV files"
                     } else if (snapshot != null) {
-                        classesWithRoster = snapshot.documents
+
+                        val rosterDocuments = snapshot.documents
+
+                        classesWithRoster = rosterDocuments
                             .mapNotNull { it.getString("classId") }
                             .toSet()
+
+                        // Keep every subject-semester combination for each class.
+                        rosterContextsByClass = rosterDocuments
+                            .groupBy { document ->
+                                document.getString("classId").orEmpty()
+                            }
+                            .filterKeys { it.isNotBlank() }
+                            .mapValues { (_, documents) ->
+
+                                documents.mapNotNull { document ->
+                                    val subject = document
+                                        .getString("subjectName")
+                                        ?.trim()
+                                        .orEmpty()
+
+                                    val semesterValue = document
+                                        .getString("semester")
+                                        ?.trim()
+                                        .orEmpty()
+
+                                    if (
+                                        subject.isNotBlank() &&
+                                        semesterValue.isNotBlank()
+                                    ) {
+                                        QHubRosterContext(
+                                            subjectName = subject,
+                                            semester = semesterValue
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                }.distinctBy {
+                                    "${it.subjectName.lowercase()}|${it.semester.lowercase()}"
+                                }
+                            }
                     }
                 }
         } else {
@@ -234,6 +276,7 @@ fun TeacherDashboard(
                             chunk.forEach { (documentId, data) ->
                                 val ref = db.collection("studentRoster")
                                     .document(documentId)
+
                                 batch.set(ref, data)
                             }
 
@@ -594,11 +637,16 @@ fun TeacherDashboard(
                     CreateQuizScreen(
                         className = currentClass.name,
 
+                        availableRosterContexts =
+                            rosterContextsByClass[currentClass.id].orEmpty(),
+
                         onBack = {
                             showCreateQuiz = false
                         },
 
                         onSaveQuiz = {
+                                selectedSubject,
+                                selectedSemester,
                                 title,
                                 questions,
                                 duration,
@@ -618,6 +666,8 @@ fun TeacherDashboard(
                                     teacherId = teacherId,
                                     classId = currentClass.id,
                                     className = currentClass.name,
+                                    subjectName = selectedSubject,
+                                    semester = selectedSemester,
                                     title = title,
                                     questions = questions,
                                     durationMinutes = duration,

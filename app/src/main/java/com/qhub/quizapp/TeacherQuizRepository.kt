@@ -12,6 +12,8 @@ object TeacherQuizRepository {
         teacherId: String,
         classId: String,
         className: String,
+        subjectName: String,
+        semester: String,
         title: String,
         questions: List<QHubQuizQuestionDraft>,
         durationMinutes: Int,
@@ -22,28 +24,35 @@ object TeacherQuizRepository {
         onSuccess: (String) -> Unit,
         onFailure: (String) -> Unit
     ) {
+
         db.collection("studentRoster")
             .whereEqualTo("teacherId", teacherId)
             .whereEqualTo("classId", classId)
-            .limit(1)
+            .whereEqualTo("subjectName", subjectName)
+            .whereEqualTo("semester", semester)
             .get()
             .addOnSuccessListener { rosterSnapshot ->
 
                 if (rosterSnapshot.isEmpty) {
-                    onFailure("No CSV roster found for this class.")
+                    onFailure(
+                        "No student roster found for $subjectName, Semester $semester."
+                    )
                     return@addOnSuccessListener
                 }
 
-                val roster = rosterSnapshot.documents.first()
+                // Collect Firebase UIDs of students linked to this roster.
+                val allowedStudentUids = rosterSnapshot.documents
+                    .mapNotNull { document ->
+                        document.getString("studentUid")
+                            ?.takeIf { it.isNotBlank() }
+                    }
+                    .distinct()
 
-                val subjectName =
-                    roster.getString("subjectName") ?: ""
-
-                val semester =
-                    roster.getString("semester") ?: ""
-
-                if (subjectName.isBlank() || semester.isBlank()) {
-                    onFailure("Subject or semester information is missing.")
+                if (allowedStudentUids.isEmpty()) {
+                    onFailure(
+                        "No students from this subject and semester have linked " +
+                                "their QHub accounts yet. Ask at least one student to log in first."
+                    )
                     return@addOnSuccessListener
                 }
 
@@ -55,7 +64,7 @@ object TeacherQuizRepository {
 
                 val quizDocument = quizCollection.document()
 
-                // Student-readable questions: NO correct answers here.
+                // Public quiz questions: correct answers are NOT included.
                 val questionData = questions.mapIndexed { index, question ->
                     hashMapOf(
                         "questionNumber" to index + 1,
@@ -64,29 +73,41 @@ object TeacherQuizRepository {
                     )
                 }
 
-                // Teacher-only answer key.
+                // Private answer key, readable only by the teacher.
                 val answerKey = hashMapOf(
-                    "correctAnswerIndexes" to
-                            questions.map { it.correctAnswerIndex }
+                    "correctAnswerIndexes" to questions.map {
+                        it.correctAnswerIndex
+                    }
                 )
 
                 val quizData = hashMapOf(
                     "quizId" to quizDocument.id,
                     "title" to title.trim(),
+
                     "classId" to classId,
                     "className" to className,
+
                     "teacherId" to teacherId,
                     "subjectName" to subjectName,
                     "semester" to semester,
+
+                    "allowedStudentUids" to allowedStudentUids,
+
                     "questions" to questionData,
                     "totalQuestions" to questions.size,
                     "totalMarks" to questions.size,
+
                     "durationMinutes" to durationMinutes,
+
                     "scheduledDate" to scheduledDate,
                     "scheduledTime" to scheduledTime,
+
                     "shuffleQuestions" to shuffleQuestions,
                     "shuffleOptions" to shuffleOptions,
+
+                    // Keep the existing Firestore status.
                     "status" to "SCHEDULED",
+
                     "createdAt" to FieldValue.serverTimestamp()
                 )
 
@@ -114,7 +135,7 @@ object TeacherQuizRepository {
             .addOnFailureListener { exception ->
                 onFailure(
                     exception.localizedMessage
-                        ?: "Could not retrieve class roster."
+                        ?: "Could not retrieve student roster."
                 )
             }
     }

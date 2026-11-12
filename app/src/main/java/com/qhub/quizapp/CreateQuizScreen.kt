@@ -20,11 +20,19 @@ data class QHubQuizQuestionDraft(
     val correctAnswerIndex: Int = -1
 )
 
+data class QHubRosterContext(
+    val subjectName: String = "",
+    val semester: String = ""
+)
+
 @Composable
 fun CreateQuizScreen(
     className: String,
+    availableRosterContexts: List<QHubRosterContext>,
     onBack: () -> Unit,
     onSaveQuiz: (
+        subjectName: String,
+        semester: String,
         title: String,
         questions: List<QHubQuizQuestionDraft>,
         durationMinutes: Int,
@@ -41,6 +49,61 @@ fun CreateQuizScreen(
 
     var questions by remember {
         mutableStateOf(listOf(QHubQuizQuestionDraft()))
+    }
+
+    var selectedSubject by remember { mutableStateOf("") }
+    var selectedSemester by remember { mutableStateOf("") }
+
+    var subjectExpanded by remember { mutableStateOf(false) }
+    var semesterExpanded by remember { mutableStateOf(false) }
+
+    val availableSubjects = remember(availableRosterContexts) {
+        availableRosterContexts
+            .map { it.subjectName.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+    }
+
+    val availableSemesters = remember(
+        availableRosterContexts,
+        selectedSubject
+    ) {
+        availableRosterContexts
+            .filter {
+                it.subjectName.equals(
+                    selectedSubject,
+                    ignoreCase = true
+                )
+            }
+            .map { it.semester.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+    }
+
+    LaunchedEffect(availableRosterContexts) {
+        if (availableRosterContexts.isNotEmpty()) {
+            if (selectedSubject.isBlank() ||
+                availableSubjects.none {
+                    it.equals(selectedSubject, ignoreCase = true)
+                }
+            ) {
+                selectedSubject = availableSubjects.firstOrNull().orEmpty()
+            }
+        }
+    }
+
+    LaunchedEffect(selectedSubject, availableSemesters) {
+        if (availableSemesters.isNotEmpty() &&
+            availableSemesters.none {
+                it.equals(selectedSemester, ignoreCase = true)
+            }
+        ) {
+            selectedSemester = availableSemesters.first()
+        }
+
+        if (availableSemesters.isEmpty()) {
+            selectedSemester = ""
+        }
     }
 
     var durationHours by remember { mutableStateOf("1") }
@@ -83,7 +146,100 @@ fun CreateQuizScreen(
             fontWeight = FontWeight.Bold
         )
 
-        Text("Class: $className", color = colors.onSurfaceVariant)
+        Text(
+            "Class: $className",
+            color = colors.onSurfaceVariant
+        )
+
+        // Subject selection
+        Text(
+            "Subject",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+
+            OutlinedButton(
+                onClick = { subjectExpanded = true },
+                enabled = !isSaving && availableSubjects.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(
+                    if (selectedSubject.isBlank()) {
+                        "Select Subject"
+                    } else {
+                        selectedSubject
+                    }
+                )
+            }
+
+            DropdownMenu(
+                expanded = subjectExpanded,
+                onDismissRequest = { subjectExpanded = false },
+                modifier = Modifier.fillMaxWidth(0.85f)
+            ) {
+                availableSubjects.forEach { subject ->
+                    DropdownMenuItem(
+                        text = { Text(subject) },
+                        onClick = {
+                            selectedSubject = subject
+                            selectedSemester = ""
+                            subjectExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        // Semester selection
+        Text(
+            "Semester",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+
+            OutlinedButton(
+                onClick = { semesterExpanded = true },
+                enabled = !isSaving && availableSemesters.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(
+                    if (selectedSemester.isBlank()) {
+                        "Select Semester"
+                    } else {
+                        selectedSemester
+                    }
+                )
+            }
+
+            DropdownMenu(
+                expanded = semesterExpanded,
+                onDismissRequest = { semesterExpanded = false },
+                modifier = Modifier.fillMaxWidth(0.85f)
+            ) {
+                availableSemesters.forEach { semester ->
+                    DropdownMenuItem(
+                        text = { Text(semester) },
+                        onClick = {
+                            selectedSemester = semester
+                            semesterExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        if (availableRosterContexts.isEmpty()) {
+            Text(
+                "No subject and semester roster found for this class. Upload a student CSV first.",
+                color = colors.error
+            )
+        }
 
         OutlinedTextField(
             value = quizTitle,
@@ -194,12 +350,16 @@ fun CreateQuizScreen(
                     }
 
                     Text(
-                        if (question.correctAnswerIndex == -1)
+                        if (question.correctAnswerIndex == -1) {
                             "No correct answer selected"
-                        else
-                            "Correct answer: Option ${question.correctAnswerIndex + 1}",
-                        color = if (question.correctAnswerIndex == -1)
-                            colors.error else colors.primary
+                        } else {
+                            "Correct answer: Option ${question.correctAnswerIndex + 1}"
+                        },
+                        color = if (question.correctAnswerIndex == -1) {
+                            colors.error
+                        } else {
+                            colors.primary
+                        }
                     )
                 }
             }
@@ -318,7 +478,6 @@ fun CreateQuizScreen(
 
         Button(
             onClick = {
-
                 if (isSaving) return@Button
 
                 val hours = durationHours.toIntOrNull()
@@ -340,6 +499,14 @@ fun CreateQuizScreen(
                     }
 
                 when {
+
+                    selectedSubject.isBlank() -> {
+                        errorMessage = "Select a subject."
+                    }
+
+                    selectedSemester.isBlank() -> {
+                        errorMessage = "Select a semester."
+                    }
 
                     quizTitle.isBlank() -> {
                         errorMessage = "Enter a quiz title."
@@ -382,6 +549,8 @@ fun CreateQuizScreen(
                         isSaving = true
 
                         onSaveQuiz(
+                            selectedSubject,
+                            selectedSemester,
                             quizTitle.trim(),
                             questions.toList(),
                             duration,

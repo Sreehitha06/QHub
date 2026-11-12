@@ -26,6 +26,7 @@ import com.qhub.quizapp.StudentEnrollment
 import com.qhub.quizapp.StudentRepository
 import com.qhub.quizapp.data.StudentQuizRepository
 import com.qhub.quizapp.data.StudentQuizRecord
+import com.qhub.quizapp.data.StudentQuizStatus
 
 private val Cream = Color(0xFFF0EEE8)
 private val Taupe = Color(0xFFB1A496)
@@ -55,6 +56,19 @@ fun StudentDashboard(
         mutableStateOf(false)
     }
 
+    // Student quiz loading states
+    var studentQuizRecords by remember {
+        mutableStateOf<List<StudentQuizRecord>>(emptyList())
+    }
+
+    var quizzesLoading by remember {
+        mutableStateOf(false)
+    }
+
+    var quizzesError by remember {
+        mutableStateOf("")
+    }
+
     // Firebase subject enrollment states
     var studentEnrollments by remember {
         mutableStateOf<List<StudentEnrollment>>(emptyList())
@@ -72,8 +86,27 @@ fun StudentDashboard(
         StudentRepository()
     }
 
-    // Fetch subjects whenever the student opens the Semester screen.
+    // Load quizzes from Firebase.
+    fun loadStudentQuizzes() {
+        quizzesLoading = true
+        quizzesError = ""
+
+        StudentQuizRepository.loadStudentQuizzes(
+            onSuccess = { records ->
+                studentQuizRecords = records
+                quizzesLoading = false
+                quizzesError = ""
+            },
+            onFailure = { error ->
+                quizzesLoading = false
+                quizzesError = error
+            }
+        )
+    }
+
+    // Fetch subjects and quizzes whenever their screens open.
     LaunchedEffect(currentScreen) {
+
         if (currentScreen == "semester") {
             subjectsLoading = true
             subjectsError = ""
@@ -89,6 +122,14 @@ fun StudentDashboard(
                     subjectsError = error
                 }
             )
+        }
+
+        if (
+            currentScreen == "upcoming" ||
+            currentScreen == "attempted" ||
+            currentScreen == "unattempted"
+        ) {
+            loadStudentQuizzes()
         }
     }
 
@@ -189,7 +230,6 @@ fun StudentDashboard(
                                     Button(
                                         onClick = {
                                             currentScreen = "dashboard"
-                                            // Reopening Semester triggers a fresh fetch.
                                         },
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = DeepBlue
@@ -259,37 +299,91 @@ fun StudentDashboard(
         }
 
         "attempted" -> {
-            StudentQuizListScreen(
-                title = "Attempted Quizzes",
-                quizzes = StudentQuizRepository.getAttemptedQuizzes(),
-                showMarks = true,
-                onBack = { currentScreen = "dashboard" }
-            )
+            if (quizzesLoading || quizzesError.isNotBlank()) {
+                QuizListStatusScreen(
+                    title = "Attempted Quizzes",
+                    loading = quizzesLoading,
+                    error = quizzesError,
+                    onBack = {
+                        currentScreen = "dashboard"
+                    },
+                    onRetry = {
+                        loadStudentQuizzes()
+                    }
+                )
+            } else {
+                StudentQuizListScreen(
+                    title = "Attempted Quizzes",
+                    quizzes = studentQuizRecords.filter {
+                        it.status == StudentQuizStatus.ATTEMPTED
+                    },
+                    showMarks = true,
+                    onBack = {
+                        currentScreen = "dashboard"
+                    }
+                )
+            }
         }
 
         "unattempted" -> {
-            StudentQuizListScreen(
-                title = "Unattempted Quizzes",
-                quizzes = StudentQuizRepository.getUnattemptedQuizzes(),
-                onBack = { currentScreen = "dashboard" }
-            )
+            if (quizzesLoading || quizzesError.isNotBlank()) {
+                QuizListStatusScreen(
+                    title = "Unattempted Quizzes",
+                    loading = quizzesLoading,
+                    error = quizzesError,
+                    onBack = {
+                        currentScreen = "dashboard"
+                    },
+                    onRetry = {
+                        loadStudentQuizzes()
+                    }
+                )
+            } else {
+                StudentQuizListScreen(
+                    title = "Unattempted Quizzes",
+                    quizzes = studentQuizRecords.filter {
+                        it.status == StudentQuizStatus.UNATTEMPTED
+                    },
+                    onBack = {
+                        currentScreen = "dashboard"
+                    }
+                )
+            }
         }
 
         "upcoming" -> {
-            StudentQuizListScreen(
-                title = "Upcoming Quizzes",
-                quizzes = StudentQuizRepository.getUpcomingQuizzes(),
-                showSchedule = true,
-                onBack = { currentScreen = "dashboard" },
-                onAttemptQuiz = { record ->
-                    if (record.quiz != null) {
-                        selectedRecord = record
-                        currentScreen = "instructions"
-                    } else {
-                        showQuizUnavailableDialog = true
+            if (quizzesLoading || quizzesError.isNotBlank()) {
+                QuizListStatusScreen(
+                    title = "Upcoming Quizzes",
+                    loading = quizzesLoading,
+                    error = quizzesError,
+                    onBack = {
+                        currentScreen = "dashboard"
+                    },
+                    onRetry = {
+                        loadStudentQuizzes()
                     }
-                }
-            )
+                )
+            } else {
+                StudentQuizListScreen(
+                    title = "Upcoming Quizzes",
+                    quizzes = studentQuizRecords.filter {
+                        it.status == StudentQuizStatus.UPCOMING
+                    },
+                    showSchedule = true,
+                    onBack = {
+                        currentScreen = "dashboard"
+                    },
+                    onAttemptQuiz = { record ->
+                        if (record.quiz != null) {
+                            selectedRecord = record
+                            currentScreen = "instructions"
+                        } else {
+                            showQuizUnavailableDialog = true
+                        }
+                    }
+                )
+            }
         }
 
         "instructions" -> {
@@ -298,7 +392,9 @@ fun StudentDashboard(
             if (quiz != null) {
                 QuizInstructions(
                     quiz = quiz,
-                    onStartQuiz = { currentScreen = "quiz" }
+                    onStartQuiz = {
+                        currentScreen = "quiz"
+                    }
                 )
             } else {
                 currentScreen = "upcoming"
@@ -380,7 +476,9 @@ fun StudentDashboard(
                             modifier = Modifier.align(Alignment.CenterEnd)
                         ) {
                             IconButton(
-                                onClick = { profileMenuExpanded = true },
+                                onClick = {
+                                    profileMenuExpanded = true
+                                },
                                 modifier = Modifier
                                     .size(44.dp)
                                     .background(DeepBlue, CircleShape)
@@ -471,7 +569,9 @@ fun StudentDashboard(
             onDismissRequest = {
                 showQuizUnavailableDialog = false
             },
-            title = { Text("Quiz not ready") },
+            title = {
+                Text("Quiz not ready")
+            },
             text = {
                 Text("The quiz questions are not available yet.")
             },
@@ -489,6 +589,96 @@ fun StudentDashboard(
 }
 
 @Composable
+private fun QuizListStatusScreen(
+    title: String,
+    loading: Boolean,
+    error: String,
+    onBack: () -> Unit,
+    onRetry: () -> Unit
+) {
+    PatternBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                BackButton(onClick = onBack)
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Text(
+                title,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold,
+                color = DeepBlue
+            )
+
+            Spacer(Modifier.height(35.dp))
+
+            if (loading) {
+                CircularProgressIndicator(color = DeepBlue)
+
+                Spacer(Modifier.height(15.dp))
+
+                Text(
+                    "Loading quizzes from Firebase...",
+                    color = BlueGray,
+                    fontSize = 14.sp
+                )
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = White
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "Unable to load quizzes",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepBlue
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Text(
+                            error,
+                            color = Color.Red,
+                            textAlign = TextAlign.Center,
+                            fontSize = 14.sp
+                        )
+
+                        Spacer(Modifier.height(18.dp))
+
+                        Button(
+                            onClick = onRetry,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DeepBlue
+                            )
+                        ) {
+                            Text("Try Again", color = White)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StudentProfileScreen(
     onBack: () -> Unit,
     onEdit: (StudentDetails) -> Unit
@@ -499,8 +689,13 @@ private fun StudentProfileScreen(
         mutableStateOf<StudentDetails?>(null)
     }
 
-    var loading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf("") }
+    var loading by remember {
+        mutableStateOf(true)
+    }
+
+    var errorMessage by remember {
+        mutableStateOf("")
+    }
 
     LaunchedEffect(uid) {
         if (uid == null) {
@@ -559,7 +754,9 @@ private fun StudentProfileScreen(
                     Spacer(Modifier.height(24.dp))
 
                     Button(
-                        onClick = { onEdit(details) },
+                        onClick = {
+                            onEdit(details)
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
@@ -616,7 +813,9 @@ private fun ProfileDetailCard(
             Spacer(Modifier.height(5.dp))
 
             Text(
-                value.ifBlank { "Not provided" },
+                value.ifBlank {
+                    "Not provided"
+                },
                 fontSize = 16.sp,
                 color = DeepBlue,
                 fontWeight = FontWeight.SemiBold
@@ -774,7 +973,9 @@ private fun PatternBackground(
 
 @Composable
 private fun ProfileIcon() {
-    Canvas(modifier = Modifier.size(27.dp)) {
+    Canvas(
+        modifier = Modifier.size(27.dp)
+    ) {
         val strokeWidth = 2.dp.toPx()
 
         drawCircle(
@@ -788,7 +989,10 @@ private fun ProfileIcon() {
             startAngle = 180f,
             sweepAngle = 180f,
             useCenter = false,
-            topLeft = Offset(size.width * 0.16f, size.height * 0.43f),
+            topLeft = Offset(
+                size.width * 0.16f,
+                size.height * 0.43f
+            ),
             size = androidx.compose.ui.geometry.Size(
                 size.width * 0.68f,
                 size.height * 0.65f
@@ -851,7 +1055,9 @@ private fun InfoCard(
             containerColor = White
         )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
             Text(
                 title,
                 fontSize = 16.sp,
