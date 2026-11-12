@@ -27,8 +27,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,6 +87,10 @@ fun TeacherDashboard(
     var editDepartment by remember { mutableStateOf("") }
     var editDesignation by remember { mutableStateOf("") }
     var isEditing by remember { mutableStateOf(false) }
+
+    // PROFILE SAVING STATE
+    var isProfileSaving by remember { mutableStateOf(false) }
+    var profileMessage by remember { mutableStateOf<String?>(null) }
 
     var classes by remember {
         mutableStateOf(listOf<QHubTeacherClass>())
@@ -155,6 +161,38 @@ fun TeacherDashboard(
         onDispose {
             classRegistration?.remove()
             rosterRegistration?.remove()
+        }
+    }
+
+    // LOAD TEACHER PROFILE FROM FIRESTORE
+    DisposableEffect(uid) {
+        var profileRegistration: ListenerRegistration? = null
+
+        if (uid != null) {
+            profileRegistration = db.collection("teachers")
+                .document(uid)
+                .addSnapshotListener { snapshot, error ->
+
+                    if (error != null) {
+                        profileMessage = error.localizedMessage
+                            ?: "Could not load teacher profile."
+                    } else if (snapshot != null && snapshot.exists()) {
+
+                        teacherName = snapshot.getString("name")
+                            ?: user?.displayName
+                                    ?: "Teacher"
+
+                        department = snapshot.getString("department")
+                            ?: "Department Name"
+
+                        designation = snapshot.getString("designation")
+                            ?: "Faculty"
+                    }
+                }
+        }
+
+        onDispose {
+            profileRegistration?.remove()
         }
     }
 
@@ -282,6 +320,7 @@ fun TeacherDashboard(
             IconButton(
                 onClick = {
                     isEditing = false
+                    profileMessage = null
                     showProfile = true
                 }
             ) {
@@ -993,8 +1032,11 @@ fun TeacherDashboard(
     if (showProfile) {
         AlertDialog(
             onDismissRequest = {
-                showProfile = false
-                isEditing = false
+                if (!isProfileSaving) {
+                    showProfile = false
+                    isEditing = false
+                    profileMessage = null
+                }
             },
             title = {
                 Text(
@@ -1057,30 +1099,97 @@ fun TeacherDashboard(
                         QHubTeacherProfileDetailRow("Department", department)
                         QHubTeacherProfileDetailRow("Designation", designation)
                     }
+
+                    profileMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = if (
+                                message == "Profile saved successfully."
+                            ) {
+                                colors.primary
+                            } else {
+                                colors.error
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             },
             confirmButton = {
                 if (isEditing) {
                     TextButton(
+                        enabled = !isProfileSaving,
                         onClick = {
-                            if (editName.isNotBlank()) {
-                                teacherName = editName.trim()
+                            val currentUid = uid
 
-                                val updates =
-                                    com.google.firebase.auth
-                                        .UserProfileChangeRequest.Builder()
-                                        .setDisplayName(teacherName)
-                                        .build()
-
-                                auth.currentUser?.updateProfile(updates)
+                            if (currentUid == null) {
+                                profileMessage = "Please log in again."
+                                return@TextButton
                             }
 
-                            department = editDepartment.trim()
-                            designation = editDesignation.trim()
-                            isEditing = false
+                            if (editName.isBlank()) {
+                                profileMessage =
+                                    "Teacher name cannot be empty."
+                                return@TextButton
+                            }
+
+                            isProfileSaving = true
+                            profileMessage = null
+
+                            val updatedName = editName.trim()
+                            val updatedDepartment = editDepartment.trim()
+                            val updatedDesignation = editDesignation.trim()
+
+                            val profileData = hashMapOf(
+                                "name" to updatedName,
+                                "email" to teacherEmail,
+                                "department" to updatedDepartment,
+                                "designation" to updatedDesignation,
+                                "updatedAt" to System.currentTimeMillis()
+                            )
+
+                            db.collection("teachers")
+                                .document(currentUid)
+                                .set(
+                                    profileData,
+                                    SetOptions.merge()
+                                )
+                                .addOnSuccessListener {
+
+                                    teacherName = updatedName
+                                    department = updatedDepartment
+                                    designation = updatedDesignation
+
+                                    val updates =
+                                        UserProfileChangeRequest.Builder()
+                                            .setDisplayName(updatedName)
+                                            .build()
+
+                                    auth.currentUser?.updateProfile(updates)
+
+                                    isProfileSaving = false
+                                    isEditing = false
+                                    profileMessage =
+                                        "Profile saved successfully."
+                                }
+                                .addOnFailureListener { exception ->
+
+                                    isProfileSaving = false
+
+                                    profileMessage =
+                                        exception.localizedMessage
+                                            ?: "Could not save profile."
+                                }
                         }
                     ) {
-                        Text("Save Changes")
+                        if (isProfileSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Save Changes")
+                        }
                     }
                 } else {
                     TextButton(
@@ -1088,6 +1197,7 @@ fun TeacherDashboard(
                             editName = teacherName
                             editDepartment = department
                             editDesignation = designation
+                            profileMessage = null
                             isEditing = true
                         }
                     ) {
@@ -1097,18 +1207,30 @@ fun TeacherDashboard(
             },
             dismissButton = {
                 if (isEditing) {
-                    TextButton(onClick = { isEditing = false }) {
+                    TextButton(
+                        enabled = !isProfileSaving,
+                        onClick = {
+                            isEditing = false
+                            profileMessage = null
+                        }
+                    ) {
                         Text("Cancel")
                     }
                 } else {
                     Row {
-                        TextButton(onClick = { showProfile = false }) {
+                        TextButton(
+                            onClick = {
+                                showProfile = false
+                                profileMessage = null
+                            }
+                        ) {
                             Text("Close")
                         }
 
                         TextButton(
                             onClick = {
                                 showProfile = false
+                                profileMessage = null
                                 onLogout()
                             }
                         ) {
