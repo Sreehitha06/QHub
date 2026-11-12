@@ -52,6 +52,11 @@ private data class QHubTeacherClass(
     val name: String
 )
 
+private data class QHubSubjectSemester(
+    val subjectName: String,
+    val semester: String
+)
+
 @Composable
 fun TeacherDashboard(
     onLogout: () -> Unit
@@ -67,6 +72,17 @@ fun TeacherDashboard(
     var showCreateClass by remember { mutableStateOf(false) }
     var showCsvUpload by remember { mutableStateOf(false) }
     var showCreateQuiz by remember { mutableStateOf(false) }
+
+    // SUBJECT AND SEMESTER SELECTION BEFORE QUIZ CREATION
+    var showSubjectPicker by remember { mutableStateOf(false) }
+    var subjectSemesterOptions by remember {
+        mutableStateOf(listOf<QHubSubjectSemester>())
+    }
+    var selectedSubjectSemester by remember {
+        mutableStateOf<QHubSubjectSemester?>(null)
+    }
+    var isLoadingSubjectOptions by remember { mutableStateOf(false) }
+    var subjectPickerMessage by remember { mutableStateOf<String?>(null) }
 
     // MANAGE QUIZZES, EDIT QUIZ AND RESULTS NAVIGATION
     var showManageQuizzes by remember { mutableStateOf(false) }
@@ -88,7 +104,6 @@ fun TeacherDashboard(
     var editDesignation by remember { mutableStateOf("") }
     var isEditing by remember { mutableStateOf(false) }
 
-    // PROFILE SAVING STATE
     var isProfileSaving by remember { mutableStateOf(false) }
     var profileMessage by remember { mutableStateOf<String?>(null) }
 
@@ -734,52 +749,114 @@ fun TeacherDashboard(
 
                 // CREATE QUIZ SCREEN
                 showCreateQuiz -> {
-                    CreateQuizScreen(
-                        className = currentClass.name,
+                    val selectedEnrollment = selectedSubjectSemester
 
-                        onBack = {
-                            showCreateQuiz = false
-                        },
-
-                        onSaveQuiz = {
-                                title,
-                                questions,
-                                duration,
-                                date,
-                                time,
-                                shuffleQuestions,
-                                shuffleOptions,
-                                onResult ->
-
-                            val teacherId = FirebaseAuth.getInstance()
-                                .currentUser?.uid
-
-                            if (teacherId == null) {
-                                onResult(false, "Please log in again.")
-                            } else {
-                                TeacherQuizRepository.saveQuiz(
-                                    teacherId = teacherId,
-                                    classId = currentClass.id,
-                                    className = currentClass.name,
-                                    title = title,
-                                    questions = questions,
-                                    durationMinutes = duration,
-                                    scheduledDate = date,
-                                    scheduledTime = time,
-                                    shuffleQuestions = shuffleQuestions,
-                                    shuffleOptions = shuffleOptions,
-
-                                    onSuccess = {
-                                        onResult(true, null)
-                                    },
-
-                                    onFailure = { error ->
-                                        onResult(false, error)
-                                    }
+                    if (selectedEnrollment != null) {
+                        Column(
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = colors.primaryContainer
                                 )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp)
+                                ) {
+                                    Text(
+                                        "Quiz subject",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = colors.onPrimaryContainer
+                                    )
+                                    Text(
+                                        selectedEnrollment.subjectName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.onPrimaryContainer
+                                    )
+                                    Text(
+                                        "Semester: ${selectedEnrollment.semester}",
+                                        color = colors.onPrimaryContainer
+                                    )
+                                }
+                            }
+
+                            CreateQuizScreen(
+                                className = currentClass.name,
+
+                                onBack = {
+                                    showCreateQuiz = false
+                                    selectedSubjectSemester = null
+                                },
+
+                                onSaveQuiz = {
+                                        title,
+                                        questions,
+                                        duration,
+                                        date,
+                                        time,
+                                        shuffleQuestions,
+                                        shuffleOptions,
+                                        onResult ->
+
+                                    val teacherId = FirebaseAuth.getInstance()
+                                        .currentUser?.uid
+
+                                    if (teacherId == null) {
+                                        onResult(false, "Please log in again.")
+                                    } else {
+                                        TeacherQuizRepository.saveQuiz(
+                                            teacherId = teacherId,
+                                            classId = currentClass.id,
+                                            className = currentClass.name,
+                                            title = title,
+                                            questions = questions,
+                                            durationMinutes = duration,
+                                            scheduledDate = date,
+                                            scheduledTime = time,
+                                            shuffleQuestions = shuffleQuestions,
+                                            shuffleOptions = shuffleOptions,
+                                            subjectName = selectedEnrollment.subjectName,
+                                            semester = selectedEnrollment.semester,
+
+                                            onSuccess = {
+                                                onResult(true, null)
+                                            },
+
+                                            onFailure = { error ->
+                                                onResult(false, error)
+                                            }
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                "Please select a subject and semester first.",
+                                color = colors.error
+                            )
+
+                            Button(
+                                onClick = {
+                                    showCreateQuiz = false
+                                    showSubjectPicker = true
+                                }
+                            ) {
+                                Text("Select Subject")
                             }
                         }
-                    )
+                    }
                 }
 
                 // CLASS HOME SCREEN
@@ -793,14 +870,82 @@ fun TeacherDashboard(
                             showManageQuizzes = false
                             showQuizResults = false
                             showEditQuiz = false
+                            showSubjectPicker = false
+                            selectedSubjectSemester = null
                             selectedQuizId = ""
                         },
 
                         onCreateQuiz = {
-                            showCreateQuiz = true
-                            showManageQuizzes = false
-                            showQuizResults = false
-                            showEditQuiz = false
+                            val teacherId = uid
+
+                            subjectSemesterOptions = emptyList()
+                            selectedSubjectSemester = null
+                            subjectPickerMessage = null
+                            isLoadingSubjectOptions = true
+                            showSubjectPicker = true
+
+                            if (teacherId == null) {
+                                isLoadingSubjectOptions = false
+                                subjectPickerMessage = "Please log in again."
+                            } else {
+                                db.collection("studentRoster")
+                                    .whereEqualTo("teacherId", teacherId)
+                                    .whereEqualTo("classId", currentClass.id)
+                                    .get()
+                                    .addOnSuccessListener { snapshot ->
+
+                                        val options = snapshot.documents
+                                            .mapNotNull { document ->
+                                                val subject = document
+                                                    .getString("subjectName")
+                                                    ?.trim()
+                                                    .orEmpty()
+
+                                                val semesterValue = document
+                                                    .getString("semester")
+                                                    ?.trim()
+                                                    .orEmpty()
+
+                                                if (
+                                                    subject.isBlank() ||
+                                                    semesterValue.isBlank()
+                                                ) {
+                                                    null
+                                                } else {
+                                                    QHubSubjectSemester(
+                                                        subjectName = subject,
+                                                        semester = semesterValue
+                                                    )
+                                                }
+                                            }
+                                            .distinctBy {
+                                                it.subjectName.lowercase() +
+                                                        "|" + it.semester.lowercase()
+                                            }
+                                            .sortedWith(
+                                                compareBy(
+                                                    { it.semester },
+                                                    { it.subjectName.lowercase() }
+                                                )
+                                            )
+
+                                        subjectSemesterOptions = options
+                                        isLoadingSubjectOptions = false
+
+                                        if (options.isEmpty()) {
+                                            subjectPickerMessage =
+                                                "No subject and semester roster was found for this class. Upload its CSV roster first."
+                                        } else if (options.size == 1) {
+                                            selectedSubjectSemester = options.first()
+                                        }
+                                    }
+                                    .addOnFailureListener { exception ->
+                                        isLoadingSubjectOptions = false
+                                        subjectPickerMessage =
+                                            exception.localizedMessage
+                                                ?: "Could not load subjects for this class."
+                                    }
+                            }
                         },
 
                         onManageQuizzes = {
@@ -813,6 +958,121 @@ fun TeacherDashboard(
                 }
             }
         }
+    }
+
+    // SUBJECT AND SEMESTER PICKER DIALOG
+    if (showSubjectPicker) {
+        var expanded by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!isLoadingSubjectOptions) {
+                    showSubjectPicker = false
+                    subjectPickerMessage = null
+                }
+            },
+            title = {
+                Text(
+                    "Select Quiz Subject",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Choose the subject and semester for this quiz. " +
+                                "Students enrolled in this exact subject will see the quiz."
+                    )
+
+                    if (isLoadingSubjectOptions) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                        Text(
+                            "Loading subjects...",
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
+                    } else if (subjectSemesterOptions.isNotEmpty()) {
+                        Box {
+                            OutlinedButton(
+                                onClick = { expanded = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    selectedSubjectSemester?.let {
+                                        "${it.subjectName} — Semester ${it.semester}"
+                                    } ?: "Choose Subject and Semester"
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                subjectSemesterOptions.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(
+                                                    option.subjectName,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text(
+                                                    "Semester ${option.semester}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = colors.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedSubjectSemester = option
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    subjectPickerMessage?.let {
+                        Text(
+                            it,
+                            color = colors.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isLoadingSubjectOptions &&
+                            selectedSubjectSemester != null,
+                    onClick = {
+                        showSubjectPicker = false
+                        subjectPickerMessage = null
+                        showCreateQuiz = true
+                        showManageQuizzes = false
+                        showQuizResults = false
+                        showEditQuiz = false
+                    }
+                ) {
+                    Text("Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isLoadingSubjectOptions,
+                    onClick = {
+                        showSubjectPicker = false
+                        subjectPickerMessage = null
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // CREATE CLASS DIALOG

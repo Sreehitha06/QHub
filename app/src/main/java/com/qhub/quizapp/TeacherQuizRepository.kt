@@ -20,27 +20,76 @@ object TeacherQuizRepository {
         shuffleQuestions: Boolean,
         shuffleOptions: Boolean,
         onSuccess: (String) -> Unit,
-        onFailure: (String) -> Unit
+        onFailure: (String) -> Unit,
+        subjectName: String = "",
+        semester: String = ""
     ) {
+        if (questions.isEmpty()) {
+            onFailure("Please add at least one question.")
+            return
+        }
+
         db.collection("studentRoster")
             .whereEqualTo("teacherId", teacherId)
             .whereEqualTo("classId", classId)
-            .limit(1)
             .get()
             .addOnSuccessListener { rosterSnapshot ->
+
                 if (rosterSnapshot.isEmpty) {
                     onFailure("No CSV roster found for this class.")
                     return@addOnSuccessListener
                 }
 
-                val roster = rosterSnapshot.documents.first()
-                val subjectName = roster.getString("subjectName") ?: ""
-                val semester = roster.getString("semester") ?: ""
+                // Get all distinct subject and semester combinations.
+                val availableEnrollments = rosterSnapshot.documents
+                    .mapNotNull { document ->
+                        val subject = document.getString("subjectName")
+                            ?.trim()
+                            .orEmpty()
 
-                if (subjectName.isBlank() || semester.isBlank()) {
-                    onFailure("Subject or semester information is missing.")
+                        val semesterValue = document.getString("semester")
+                            ?.trim()
+                            .orEmpty()
+
+                        if (subject.isBlank() || semesterValue.isBlank()) {
+                            null
+                        } else {
+                            subject to semesterValue
+                        }
+                    }
+                    .distinct()
+
+                if (availableEnrollments.isEmpty()) {
+                    onFailure(
+                        "Subject or semester information is missing in the CSV roster."
+                    )
                     return@addOnSuccessListener
                 }
+
+                // Use the explicitly selected subject and semester when supplied.
+                // Otherwise, proceed only if the class has exactly one combination.
+                val selectedEnrollment =
+                    if (subjectName.isNotBlank() && semester.isNotBlank()) {
+                        availableEnrollments.firstOrNull {
+                            it.first.equals(subjectName.trim(), ignoreCase = true) &&
+                                    it.second.equals(semester.trim(), ignoreCase = true)
+                        }
+                    } else if (availableEnrollments.size == 1) {
+                        availableEnrollments.first()
+                    } else {
+                        null
+                    }
+
+                if (selectedEnrollment == null) {
+                    onFailure(
+                        "This class has multiple subjects or semesters. " +
+                                "Please select the correct subject and semester before creating the quiz."
+                    )
+                    return@addOnSuccessListener
+                }
+
+                val selectedSubject = selectedEnrollment.first
+                val selectedSemester = selectedEnrollment.second
 
                 val quizCollection = db.collection("teachers")
                     .document(teacherId)
@@ -50,6 +99,7 @@ object TeacherQuizRepository {
 
                 val quizDocument = quizCollection.document()
 
+                // Student-readable questions contain no correct answers.
                 val questionData = questions.mapIndexed { index, question ->
                     hashMapOf(
                         "questionNumber" to index + 1,
@@ -58,6 +108,7 @@ object TeacherQuizRepository {
                     )
                 }
 
+                // Correct answers are stored separately.
                 val answerKey = hashMapOf(
                     "correctAnswerIndexes" to
                             questions.map { it.correctAnswerIndex }
@@ -69,8 +120,8 @@ object TeacherQuizRepository {
                     "classId" to classId,
                     "className" to className,
                     "teacherId" to teacherId,
-                    "subjectName" to subjectName,
-                    "semester" to semester,
+                    "subjectName" to selectedSubject,
+                    "semester" to selectedSemester,
                     "questions" to questionData,
                     "totalQuestions" to questions.size,
                     "totalMarks" to questions.size,
@@ -99,13 +150,15 @@ object TeacherQuizRepository {
                     }
                     .addOnFailureListener { exception ->
                         onFailure(
-                            exception.localizedMessage ?: "Could not save quiz."
+                            exception.localizedMessage
+                                ?: "Could not save quiz."
                         )
                     }
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.localizedMessage ?: "Could not retrieve class roster."
+                    exception.localizedMessage
+                        ?: "Could not retrieve class roster."
                 )
             }
     }
@@ -124,6 +177,11 @@ object TeacherQuizRepository {
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit
     ) {
+        if (questions.isEmpty()) {
+            onFailure("Please add at least one question.")
+            return
+        }
+
         val quizDocument = db.collection("teachers")
             .document(teacherId)
             .collection("classes")
@@ -159,12 +217,13 @@ object TeacherQuizRepository {
 
         val batch = db.batch()
 
-        // Update the existing quiz without replacing its other metadata.
+        // Preserve the existing class, subject, semester and teacher metadata.
         batch.update(quizDocument, updatedQuizData)
 
         // Update only the private answer key.
         batch.set(
-            quizDocument.collection("answerKeys").document("private"),
+            quizDocument.collection("answerKeys")
+                .document("private"),
             answerKey
         )
 
@@ -174,7 +233,8 @@ object TeacherQuizRepository {
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.localizedMessage ?: "Could not update quiz."
+                    exception.localizedMessage
+                        ?: "Could not update quiz."
                 )
             }
     }
