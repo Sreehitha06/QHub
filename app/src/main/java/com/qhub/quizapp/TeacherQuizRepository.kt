@@ -28,19 +28,14 @@ object TeacherQuizRepository {
             .limit(1)
             .get()
             .addOnSuccessListener { rosterSnapshot ->
-
                 if (rosterSnapshot.isEmpty) {
                     onFailure("No CSV roster found for this class.")
                     return@addOnSuccessListener
                 }
 
                 val roster = rosterSnapshot.documents.first()
-
-                val subjectName =
-                    roster.getString("subjectName") ?: ""
-
-                val semester =
-                    roster.getString("semester") ?: ""
+                val subjectName = roster.getString("subjectName") ?: ""
+                val semester = roster.getString("semester") ?: ""
 
                 if (subjectName.isBlank() || semester.isBlank()) {
                     onFailure("Subject or semester information is missing.")
@@ -55,7 +50,6 @@ object TeacherQuizRepository {
 
                 val quizDocument = quizCollection.document()
 
-                // Student-readable questions: NO correct answers here.
                 val questionData = questions.mapIndexed { index, question ->
                     hashMapOf(
                         "questionNumber" to index + 1,
@@ -64,7 +58,6 @@ object TeacherQuizRepository {
                     )
                 }
 
-                // Teacher-only answer key.
                 val answerKey = hashMapOf(
                     "correctAnswerIndexes" to
                             questions.map { it.correctAnswerIndex }
@@ -106,15 +99,82 @@ object TeacherQuizRepository {
                     }
                     .addOnFailureListener { exception ->
                         onFailure(
-                            exception.localizedMessage
-                                ?: "Could not save quiz."
+                            exception.localizedMessage ?: "Could not save quiz."
                         )
                     }
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.localizedMessage
-                        ?: "Could not retrieve class roster."
+                    exception.localizedMessage ?: "Could not retrieve class roster."
+                )
+            }
+    }
+
+    fun updateQuiz(
+        teacherId: String,
+        classId: String,
+        quizId: String,
+        title: String,
+        questions: List<QHubQuizQuestionDraft>,
+        durationMinutes: Int,
+        scheduledDate: String,
+        scheduledTime: String,
+        shuffleQuestions: Boolean,
+        shuffleOptions: Boolean,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val quizDocument = db.collection("teachers")
+            .document(teacherId)
+            .collection("classes")
+            .document(classId)
+            .collection("quizzes")
+            .document(quizId)
+
+        val questionData = questions.mapIndexed { index, question ->
+            hashMapOf(
+                "questionNumber" to index + 1,
+                "questionText" to question.question.trim(),
+                "options" to question.options.map { it.trim() }
+            )
+        }
+
+        val answerKey = hashMapOf(
+            "correctAnswerIndexes" to
+                    questions.map { it.correctAnswerIndex }
+        )
+
+        val updatedQuizData = hashMapOf<String, Any>(
+            "title" to title.trim(),
+            "questions" to questionData,
+            "totalQuestions" to questions.size,
+            "totalMarks" to questions.size,
+            "durationMinutes" to durationMinutes,
+            "scheduledDate" to scheduledDate,
+            "scheduledTime" to scheduledTime,
+            "shuffleQuestions" to shuffleQuestions,
+            "shuffleOptions" to shuffleOptions,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        val batch = db.batch()
+
+        // Update the existing quiz without replacing its other metadata.
+        batch.update(quizDocument, updatedQuizData)
+
+        // Update only the private answer key.
+        batch.set(
+            quizDocument.collection("answerKeys").document("private"),
+            answerKey
+        )
+
+        batch.commit()
+            .addOnSuccessListener {
+                onSuccess()
+            }
+            .addOnFailureListener { exception ->
+                onFailure(
+                    exception.localizedMessage ?: "Could not update quiz."
                 )
             }
     }

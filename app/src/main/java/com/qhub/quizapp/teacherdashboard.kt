@@ -66,8 +66,11 @@ fun TeacherDashboard(
     var showCsvUpload by remember { mutableStateOf(false) }
     var showCreateQuiz by remember { mutableStateOf(false) }
 
-    // NEW: MANAGE QUIZZES NAVIGATION STATE
+    // MANAGE QUIZZES, EDIT QUIZ AND RESULTS NAVIGATION
     var showManageQuizzes by remember { mutableStateOf(false) }
+    var showQuizResults by remember { mutableStateOf(false) }
+    var showEditQuiz by remember { mutableStateOf(false) }
+    var selectedQuizId by remember { mutableStateOf("") }
 
     var teacherName by remember {
         mutableStateOf(user?.displayName ?: "Teacher")
@@ -552,6 +555,95 @@ fun TeacherDashboard(
 
             when {
 
+                // QUIZ RESULTS SCREEN
+                showQuizResults -> {
+                    val currentTeacherId = uid
+
+                    if (
+                        currentTeacherId != null &&
+                        selectedQuizId.isNotBlank()
+                    ) {
+                        TeacherQuizResultsScreen(
+                            teacherId = currentTeacherId,
+                            classId = currentClass.id,
+                            quizId = selectedQuizId,
+                            onBack = {
+                                showQuizResults = false
+                                showManageQuizzes = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                "Unable to open quiz results. Please log in again.",
+                                color = colors.error
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    showQuizResults = false
+                                    showManageQuizzes = true
+                                }
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+
+                // EDIT QUIZ SCREEN
+                showEditQuiz -> {
+                    val currentTeacherId = uid
+
+                    if (
+                        currentTeacherId != null &&
+                        selectedQuizId.isNotBlank()
+                    ) {
+                        EditQuizScreen(
+                            teacherId = currentTeacherId,
+                            classId = currentClass.id,
+                            className = currentClass.name,
+                            quizId = selectedQuizId,
+                            onBack = {
+                                showEditQuiz = false
+                                showManageQuizzes = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                "Unable to edit this quiz. Please log in again.",
+                                color = colors.error
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    showEditQuiz = false
+                                    showManageQuizzes = true
+                                }
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+
                 // MANAGE QUIZZES SCREEN
                 showManageQuizzes -> {
                     val currentTeacherId = uid
@@ -563,6 +655,18 @@ fun TeacherDashboard(
                             className = currentClass.name,
                             onBack = {
                                 showManageQuizzes = false
+                                showEditQuiz = false
+                                showQuizResults = false
+                            },
+                            onQuizClick = { quizId ->
+                                selectedQuizId = quizId
+                                showQuizResults = true
+                                showEditQuiz = false
+                            },
+                            onEditQuiz = { quizId ->
+                                selectedQuizId = quizId
+                                showEditQuiz = true
+                                showQuizResults = false
                             }
                         )
                     } else {
@@ -648,16 +752,23 @@ fun TeacherDashboard(
                             selectedTeacherClass = null
                             showCreateQuiz = false
                             showManageQuizzes = false
+                            showQuizResults = false
+                            showEditQuiz = false
+                            selectedQuizId = ""
                         },
 
                         onCreateQuiz = {
                             showCreateQuiz = true
                             showManageQuizzes = false
+                            showQuizResults = false
+                            showEditQuiz = false
                         },
 
                         onManageQuizzes = {
                             showManageQuizzes = true
                             showCreateQuiz = false
+                            showQuizResults = false
+                            showEditQuiz = false
                         }
                     )
                 }
