@@ -1,3 +1,4 @@
+
 package com.qhub.quizapp
 
 import android.content.Context
@@ -68,7 +69,6 @@ class MainActivity : ComponentActivity() {
                     outline = Beige
                 )
             ) {
-
                 QHubLoginScreen()
             }
         }
@@ -109,27 +109,17 @@ fun QHubLoginScreen() {
         mutableStateOf(false)
     }
 
-    // Dashboard navigation state
+    // DASHBOARD NAVIGATION STATE
 
     var showTeacherDashboard by remember {
         mutableStateOf(false)
     }
 
-    var teacherName by remember {
-        mutableStateOf("Teacher")
-    }
-
-    var teacherEmail by remember {
-        mutableStateOf("")
-    }
-
-    // Show teacher dashboard after successful login
+    // SHOW TEACHER DASHBOARD AFTER LOGIN
 
     if (showTeacherDashboard) {
 
         TeacherDashboard(
-            teacherName = teacherName,
-            teacherEmail = auth.currentUser?.email ?: teacherEmail,
             onLogout = {
 
                 auth.signOut()
@@ -336,7 +326,7 @@ fun QHubLoginScreen() {
                         // FIREBASE REGISTRATION
 
                         auth.createUserWithEmailAndPassword(
-                            email.trim(),
+                            email.trim().lowercase(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -372,7 +362,7 @@ fun QHubLoginScreen() {
                                     Toast.LENGTH_LONG
                                 ).show()
 
-                                // Return to login screen
+                                // RETURN TO LOGIN SCREEN
 
                                 isRegistering = false
                                 name = ""
@@ -393,7 +383,7 @@ fun QHubLoginScreen() {
                         // FIREBASE LOGIN
 
                         auth.signInWithEmailAndPassword(
-                            email.trim(),
+                            email.trim().lowercase(),
                             password
                         ).addOnCompleteListener { task ->
 
@@ -402,7 +392,6 @@ fun QHubLoginScreen() {
                             if (task.isSuccessful) {
 
                                 val user = auth.currentUser
-
                                 val uid = user?.uid
 
                                 val savedRole = uid?.let {
@@ -419,24 +408,17 @@ fun QHubLoginScreen() {
 
                                 if (savedRole == "Teacher") {
 
-                                    teacherName =
-                                        user?.displayName
-                                            ?: "Teacher"
-
-                                    teacherEmail =
-                                        user?.email ?: email
-
                                     showTeacherDashboard = true
 
                                     Toast.makeText(
                                         context,
-                                        "Welcome $teacherName",
+                                        "Welcome ${user?.displayName ?: "Teacher"}",
                                         Toast.LENGTH_SHORT
                                     ).show()
 
                                 } else {
 
-                                    // Student dashboard will be developed separately.
+                                    // STUDENT DASHBOARD WILL BE CONNECTED SEPARATELY
 
                                     auth.signOut()
 
@@ -471,6 +453,7 @@ fun QHubLoginScreen() {
                 ),
 
                 enabled = !isLoading
+
             ) {
 
                 if (isLoading) {
@@ -559,7 +542,6 @@ fun QHubLogo() {
         modifier = Modifier
             .fillMaxWidth()
             .height(135.dp),
-
         contentAlignment = Alignment.Center
     ) {
 
@@ -709,7 +691,6 @@ fun QHubBackgroundPattern() {
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
-
                     center = Offset(
                         w - 58.dp.toPx() + i * 12.dp.toPx(),
                         55.dp.toPx() + j * 12.dp.toPx()
@@ -734,16 +715,12 @@ fun RoleButton(
 
     Button(
         onClick = onClick,
-
         modifier = modifier.height(50.dp),
-
         shape = RoundedCornerShape(14.dp),
-
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) DeepBlue else White,
             contentColor = if (selected) White else DeepBlue
         ),
-
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp
         )
@@ -773,7 +750,6 @@ fun QHubTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-
         modifier = Modifier.fillMaxWidth(),
 
         label = {
