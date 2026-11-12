@@ -1,3 +1,4 @@
+
 package com.qhub.quizapp
 
 import com.google.firebase.auth.FirebaseAuth
@@ -35,10 +36,8 @@ class StudentRepository {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    /**
-     * Fetch every subject/class enrollment belonging to the
-     * currently logged-in student using their verified Firebase email.
-     */
+    // Fetch all subjects assigned to the currently logged-in student.
+    // Firebase email verification is NOT required.
     fun getVerifiedStudentEnrollments(
         onSuccess: (List<StudentEnrollment>) -> Unit,
         onFailure: (String) -> Unit
@@ -50,36 +49,37 @@ class StudentRepository {
             return
         }
 
-        if (!currentUser.isEmailVerified) {
-            onFailure("Please verify your email before viewing your subjects.")
-            return
-        }
-
-        val verifiedEmail = currentUser.email
+        val studentEmail = currentUser.email
             ?.trim()
             ?.lowercase()
             .orEmpty()
 
-        if (verifiedEmail.isBlank()) {
-            onFailure("Your verified email ID could not be found.")
+        if (studentEmail.isBlank()) {
+            onFailure("Student email ID could not be found.")
             return
         }
 
         db.collection("studentRoster")
-            .whereEqualTo("email", verifiedEmail)
+            .whereEqualTo("email", studentEmail)
             .get()
             .addOnSuccessListener { documents ->
 
                 val enrollments = documents.mapNotNull { document ->
 
                     val subjectName =
-                        document.getString("subjectName")?.trim().orEmpty()
+                        document.getString("subjectName")
+                            ?.trim()
+                            .orEmpty()
 
                     val teacherId =
-                        document.getString("teacherId")?.trim().orEmpty()
+                        document.getString("teacherId")
+                            ?.trim()
+                            .orEmpty()
 
                     val classId =
-                        document.getString("classId")?.trim().orEmpty()
+                        document.getString("classId")
+                            ?.trim()
+                            .orEmpty()
 
                     // Ignore incomplete roster records.
                     if (
@@ -116,11 +116,7 @@ class StudentRepository {
                     )
                 )
 
-                if (enrollments.isEmpty()) {
-                    onSuccess(emptyList())
-                } else {
-                    onSuccess(enrollments)
-                }
+                onSuccess(enrollments)
             }
             .addOnFailureListener { exception ->
                 onFailure(
@@ -139,6 +135,11 @@ class StudentRepository {
     ) {
         val normalizedEmail = email.trim().lowercase()
 
+        if (normalizedEmail.isBlank()) {
+            onFailure("Student email ID is missing.")
+            return
+        }
+
         db.collection("studentRoster")
             .whereEqualTo("email", normalizedEmail)
             .get()
@@ -146,6 +147,8 @@ class StudentRepository {
 
                 val subjects = documents.mapNotNull { document ->
                     document.getString("subjectName")
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
                 }.distinct()
 
                 onSuccess(subjects)
@@ -158,6 +161,7 @@ class StudentRepository {
     }
 
     // Verify student against teacher's roster and save details.
+    // Only CSV email matching is required. No email verification.
     fun verifyAndSaveStudent(
         uid: String,
         name: String,
@@ -170,6 +174,11 @@ class StudentRepository {
         onFailure: (String) -> Unit
     ) {
         val normalizedEmail = email.trim().lowercase()
+
+        if (normalizedEmail.isBlank()) {
+            onFailure("Student email ID is missing.")
+            return
+        }
 
         val studentData = hashMapOf<String, Any>(
             "uid" to uid,
@@ -196,6 +205,8 @@ class StudentRepository {
 
                 val subjects = documents.mapNotNull { document ->
                     document.getString("subjectName")
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
                 }.distinct()
 
                 studentData["subjects"] = subjects
@@ -216,7 +227,7 @@ class StudentRepository {
             .addOnFailureListener { exception ->
                 onFailure(
                     exception.message
-                        ?: "Unable to verify student email."
+                        ?: "Unable to check the teacher's student roster."
                 )
             }
     }
