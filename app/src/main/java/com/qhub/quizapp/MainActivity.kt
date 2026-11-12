@@ -128,8 +128,6 @@ fun QHubLoginScreen() {
     if (showTeacherDashboard) {
 
         TeacherDashboard(
-            teacherName = teacherName,
-            teacherEmail = auth.currentUser?.email ?: teacherEmail,
             onLogout = {
 
                 auth.signOut()
