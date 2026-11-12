@@ -3,6 +3,17 @@ package com.qhub.quizapp
 
 import com.google.firebase.firestore.FirebaseFirestore
 
+data class StudentDetails(
+    val uid: String = "",
+    val name: String = "",
+    val rollNumber: String = "",
+    val email: String = "",
+    val department: String = "",
+    val section: String = "",
+    val semester: String = "",
+    val subjects: List<String> = emptyList()
+)
+
 class StudentRepository {
 
     private val db = FirebaseFirestore.getInstance()
@@ -35,7 +46,7 @@ class StudentRepository {
             }
     }
 
-    // Verify the student against the teacher's roster and save details
+    // Verify student against teacher's roster and save details
     fun verifyAndSaveStudent(
         uid: String,
         name: String,
@@ -60,7 +71,6 @@ class StudentRepository {
             "role" to "Student"
         )
 
-        // Check whether this email exists in the uploaded roster
         db.collection("studentRoster")
             .whereEqualTo("email", normalizedEmail)
             .get()
@@ -81,7 +91,6 @@ class StudentRepository {
 
                 studentData["subjects"] = subjects
 
-                // Save student details using Firebase UID
                 db.collection("students")
                     .document(uid)
                     .set(studentData)
@@ -99,6 +108,80 @@ class StudentRepository {
                 onFailure(
                     exception.message
                         ?: "Unable to verify student email."
+                )
+            }
+    }
+
+    // Get saved student details
+    fun getStudentDetails(
+        uid: String,
+        onSuccess: (StudentDetails) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        db.collection("students")
+            .document(uid)
+            .get()
+            .addOnSuccessListener { document ->
+
+                if (!document.exists()) {
+                    onFailure("Student details not found.")
+                    return@addOnSuccessListener
+                }
+
+                val subjects = (document.get("subjects") as? List<*>)
+                    ?.mapNotNull { it as? String }
+                    ?: emptyList()
+
+                val details = StudentDetails(
+                    uid = document.getString("uid") ?: uid,
+                    name = document.getString("name") ?: "",
+                    rollNumber = document.getString("rollNumber") ?: "",
+                    email = document.getString("email") ?: "",
+                    department = document.getString("department") ?: "",
+                    section = document.getString("section") ?: "",
+                    semester = document.getString("semester") ?: "",
+                    subjects = subjects
+                )
+
+                onSuccess(details)
+            }
+            .addOnFailureListener { exception ->
+                onFailure(
+                    exception.message
+                        ?: "Unable to load student details."
+                )
+            }
+    }
+
+    // Update student details without changing email or subjects
+    fun updateStudentDetails(
+        uid: String,
+        name: String,
+        rollNumber: String,
+        department: String,
+        section: String,
+        semester: String,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val updatedData = mapOf(
+            "name" to name.trim(),
+            "rollNumber" to rollNumber.trim(),
+            "department" to department.trim(),
+            "section" to section.trim(),
+            "semester" to semester.trim()
+        )
+
+        db.collection("students")
+            .document(uid)
+            .update(updatedData)
+            .addOnSuccessListener {
+                onSuccess()
+            }
+            .addOnFailureListener { exception ->
+                onFailure(
+                    exception.message
+                        ?: "Unable to update student details."
                 )
             }
     }

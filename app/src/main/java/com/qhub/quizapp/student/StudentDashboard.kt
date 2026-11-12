@@ -24,6 +24,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.qhub.quizapp.data.SemesterRepository
 import com.qhub.quizapp.data.StudentQuizRepository
 import com.qhub.quizapp.data.StudentQuizRecord
+import com.qhub.quizapp.StudentDetails
+import com.qhub.quizapp.StudentRepository
 
 private val Cream = Color(0xFFF0EEE8)
 private val Taupe = Color(0xFFB1A496)
@@ -35,11 +37,11 @@ private val White = Color(0xFFFFFFFF)
 fun StudentDashboard(
     onLogout: () -> Unit = {
         FirebaseAuth.getInstance().signOut()
-    }
+    },
+    onEditProfile: (StudentDetails) -> Unit = {}
 ) {
     var currentScreen by remember { mutableStateOf("dashboard") }
     var profileMenuExpanded by remember { mutableStateOf(false) }
-    var showEditMessage by remember { mutableStateOf(false) }
 
     var selectedRecord by remember {
         mutableStateOf<StudentQuizRecord?>(null)
@@ -58,7 +60,17 @@ fun StudentDashboard(
 
     when (currentScreen) {
 
-        // SEMESTER SCREEN
+        "profile" -> {
+            StudentProfileScreen(
+                onBack = {
+                    currentScreen = "dashboard"
+                },
+                onEdit = { details ->
+                    onEditProfile(details)
+                }
+            )
+        }
+
         "semester" -> {
             PatternBackground {
                 Column(
@@ -67,9 +79,7 @@ fun StudentDashboard(
                         .verticalScroll(rememberScrollState())
                         .padding(20.dp)
                 ) {
-                    BackButton {
-                        currentScreen = "dashboard"
-                    }
+                    BackButton { currentScreen = "dashboard" }
 
                     Spacer(Modifier.height(20.dp))
 
@@ -111,7 +121,6 @@ fun StudentDashboard(
 
                         archivedSemesters.forEach { semester ->
                             Spacer(Modifier.height(10.dp))
-
                             InfoCard(
                                 title = "Semester ${semester.semesterNumber}",
                                 subtitle = "${semester.subjects.size} subjects"
@@ -122,38 +131,29 @@ fun StudentDashboard(
             }
         }
 
-        // ATTEMPTED QUIZZES
         "attempted" -> {
             StudentQuizListScreen(
                 title = "Attempted Quizzes",
                 quizzes = StudentQuizRepository.getAttemptedQuizzes(),
                 showMarks = true,
-                onBack = {
-                    currentScreen = "dashboard"
-                }
+                onBack = { currentScreen = "dashboard" }
             )
         }
 
-        // UNATTEMPTED QUIZZES
         "unattempted" -> {
             StudentQuizListScreen(
                 title = "Unattempted Quizzes",
                 quizzes = StudentQuizRepository.getUnattemptedQuizzes(),
-                onBack = {
-                    currentScreen = "dashboard"
-                }
+                onBack = { currentScreen = "dashboard" }
             )
         }
 
-        // UPCOMING QUIZZES
         "upcoming" -> {
             StudentQuizListScreen(
                 title = "Upcoming Quizzes",
                 quizzes = StudentQuizRepository.getUpcomingQuizzes(),
                 showSchedule = true,
-                onBack = {
-                    currentScreen = "dashboard"
-                },
+                onBack = { currentScreen = "dashboard" },
                 onAttemptQuiz = { record ->
                     if (record.quiz != null) {
                         selectedRecord = record
@@ -165,23 +165,19 @@ fun StudentDashboard(
             )
         }
 
-        // QUIZ INSTRUCTIONS
         "instructions" -> {
             val quiz = selectedRecord?.quiz
 
             if (quiz != null) {
                 QuizInstructions(
                     quiz = quiz,
-                    onStartQuiz = {
-                        currentScreen = "quiz"
-                    }
+                    onStartQuiz = { currentScreen = "quiz" }
                 )
             } else {
                 currentScreen = "upcoming"
             }
         }
 
-        // QUIZ SCREEN
         "quiz" -> {
             val quiz = selectedRecord?.quiz
 
@@ -213,7 +209,6 @@ fun StudentDashboard(
             }
         }
 
-        // QUIZ RESULT
         "result" -> {
             val quiz = selectedRecord?.quiz
 
@@ -232,7 +227,6 @@ fun StudentDashboard(
             }
         }
 
-        // MAIN DASHBOARD
         else -> {
             PatternBackground {
                 Column(
@@ -242,8 +236,6 @@ fun StudentDashboard(
                         .padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-
-                    // HEADER AND PROFILE MENU
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -261,20 +253,14 @@ fun StudentDashboard(
                             modifier = Modifier.align(Alignment.CenterEnd)
                         ) {
                             IconButton(
-                                onClick = {
-                                    profileMenuExpanded = true
-                                },
+                                onClick = { profileMenuExpanded = true },
                                 modifier = Modifier
                                     .size(44.dp)
-                                    .background(
-                                        DeepBlue,
-                                        CircleShape
-                                    )
+                                    .background(DeepBlue, CircleShape)
                             ) {
                                 ProfileIcon()
                             }
 
-                            // PROFILE MENU
                             DropdownMenu(
                                 expanded = profileMenuExpanded,
                                 onDismissRequest = {
@@ -283,14 +269,11 @@ fun StudentDashboard(
                             ) {
                                 DropdownMenuItem(
                                     text = {
-                                        Text(
-                                            "Edit",
-                                            color = DeepBlue
-                                        )
+                                        Text("View Profile", color = DeepBlue)
                                     },
                                     onClick = {
                                         profileMenuExpanded = false
-                                        showEditMessage = true
+                                        currentScreen = "profile"
                                     }
                                 )
 
@@ -298,10 +281,7 @@ fun StudentDashboard(
 
                                 DropdownMenuItem(
                                     text = {
-                                        Text(
-                                            "Log Out",
-                                            color = Color.Red
-                                        )
+                                        Text("Log Out", color = Color.Red)
                                     },
                                     onClick = {
                                         profileMenuExpanded = false
@@ -359,42 +339,12 @@ fun StudentDashboard(
         }
     }
 
-    // EDIT PROFILE MESSAGE
-    if (showEditMessage) {
-        AlertDialog(
-            onDismissRequest = {
-                showEditMessage = false
-            },
-            title = {
-                Text("Edit Profile")
-            },
-            text = {
-                Text(
-                    "Your profile editing page will be connected " +
-                            "after Sahasra's registration module is integrated."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showEditMessage = false
-                    }
-                ) {
-                    Text("OK")
-                }
-            }
-        )
-    }
-
-    // QUIZ NOT AVAILABLE MESSAGE
     if (showQuizUnavailableDialog) {
         AlertDialog(
             onDismissRequest = {
                 showQuizUnavailableDialog = false
             },
-            title = {
-                Text("Quiz not ready")
-            },
+            title = { Text("Quiz not ready") },
             text = {
                 Text("The quiz questions are not available yet.")
             },
@@ -411,7 +361,141 @@ fun StudentDashboard(
     }
 }
 
-// DECORATIVE BACKGROUND
+@Composable
+private fun StudentProfileScreen(
+    onBack: () -> Unit,
+    onEdit: (StudentDetails) -> Unit
+) {
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    var studentDetails by remember {
+        mutableStateOf<StudentDetails?>(null)
+    }
+    var loading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf("") }
+
+    LaunchedEffect(uid) {
+        if (uid == null) {
+            loading = false
+            errorMessage = "Please log in again."
+        } else {
+            StudentRepository().getStudentDetails(
+                uid = uid,
+                onSuccess = { details ->
+                    studentDetails = details
+                    loading = false
+                },
+                onFailure = { error ->
+                    errorMessage = error
+                    loading = false
+                }
+            )
+        }
+    }
+
+    PatternBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp)
+        ) {
+            BackButton(onClick = onBack)
+
+            Spacer(Modifier.height(15.dp))
+
+            Text(
+                "My Profile",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = DeepBlue
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            when {
+                loading -> {
+                    CircularProgressIndicator(color = DeepBlue)
+                }
+
+                studentDetails != null -> {
+                    val details = studentDetails!!
+
+                    ProfileDetailCard("Name", details.name)
+                    ProfileDetailCard("Roll Number", details.rollNumber)
+                    ProfileDetailCard("Email ID", details.email)
+                    ProfileDetailCard("Department", details.department)
+                    ProfileDetailCard("Section", details.section)
+                    ProfileDetailCard("Semester", details.semester)
+
+                    Spacer(Modifier.height(24.dp))
+
+                    Button(
+                        onClick = { onEdit(details) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepBlue
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "Edit Profile",
+                            color = White,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+
+                else -> {
+                    Text(
+                        errorMessage.ifBlank {
+                            "Unable to load student details."
+                        },
+                        color = Color.Red
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileDetailCard(
+    label: String,
+    value: String
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = White
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                label,
+                fontSize = 13.sp,
+                color = BlueGray,
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(Modifier.height(5.dp))
+
+            Text(
+                value.ifBlank { "Not provided" },
+                fontSize = 16.sp,
+                color = DeepBlue,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
 @Composable
 private fun PatternBackground(
     content: @Composable () -> Unit
@@ -425,42 +509,28 @@ private fun PatternBackground(
             modifier = Modifier
                 .matchParentSize()
                 .drawBehind {
-
                     val patternColor = Taupe.copy(alpha = 0.55f)
                     val ringWidth = 22.dp.toPx()
 
-                    // TOP LEFT RINGS
                     drawCircle(
                         color = patternColor,
                         radius = 105.dp.toPx(),
-                        center = Offset(
-                            -45.dp.toPx(),
-                            -20.dp.toPx()
-                        ),
+                        center = Offset(-45.dp.toPx(), -20.dp.toPx()),
                         style = Stroke(width = ringWidth)
                     )
-
                     drawCircle(
                         color = patternColor,
                         radius = 125.dp.toPx(),
-                        center = Offset(
-                            -45.dp.toPx(),
-                            -20.dp.toPx()
-                        ),
+                        center = Offset(-45.dp.toPx(), -20.dp.toPx()),
                         style = Stroke(width = 3.dp.toPx())
                     )
-
                     drawCircle(
                         color = patternColor,
                         radius = 145.dp.toPx(),
-                        center = Offset(
-                            -45.dp.toPx(),
-                            -20.dp.toPx()
-                        ),
+                        center = Offset(-45.dp.toPx(), -20.dp.toPx()),
                         style = Stroke(width = 3.dp.toPx())
                     )
 
-                    // BOTTOM RIGHT RINGS
                     drawCircle(
                         color = patternColor,
                         radius = 85.dp.toPx(),
@@ -470,7 +540,6 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = ringWidth)
                     )
-
                     drawCircle(
                         color = patternColor,
                         radius = 110.dp.toPx(),
@@ -480,7 +549,6 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = 3.dp.toPx())
                     )
-
                     drawCircle(
                         color = patternColor,
                         radius = 130.dp.toPx(),
@@ -491,7 +559,6 @@ private fun PatternBackground(
                         style = Stroke(width = 3.dp.toPx())
                     )
 
-                    // TOP RIGHT DOTS
                     for (row in 0..4) {
                         for (column in 0..4) {
                             drawCircle(
@@ -500,14 +567,12 @@ private fun PatternBackground(
                                 center = Offset(
                                     size.width - 55.dp.toPx() +
                                             column * 9.dp.toPx(),
-                                    45.dp.toPx() +
-                                            row * 9.dp.toPx()
+                                    45.dp.toPx() + row * 9.dp.toPx()
                                 )
                             )
                         }
                     }
 
-                    // BOTTOM LEFT CIRCLES
                     for (i in 0..3) {
                         drawCircle(
                             color = patternColor,
@@ -520,7 +585,6 @@ private fun PatternBackground(
                         )
                     }
 
-                    // BOTTOM RIGHT DOTS
                     for (row in 0..3) {
                         for (column in 0..3) {
                             drawCircle(
@@ -536,7 +600,6 @@ private fun PatternBackground(
                         }
                     }
 
-                    // EXTRA TOP RIGHT RINGS
                     drawCircle(
                         color = patternColor,
                         radius = 35.dp.toPx(),
@@ -546,7 +609,6 @@ private fun PatternBackground(
                         ),
                         style = Stroke(width = 3.dp.toPx())
                     )
-
                     drawCircle(
                         color = patternColor,
                         radius = 48.dp.toPx(),
@@ -557,17 +619,14 @@ private fun PatternBackground(
                         style = Stroke(width = 3.dp.toPx())
                     )
 
-                    // CENTER LEFT DOTS
                     for (row in 0..2) {
                         for (column in 0..2) {
                             drawCircle(
                                 color = patternColor,
                                 radius = 2.dp.toPx(),
                                 center = Offset(
-                                    15.dp.toPx() +
-                                            column * 10.dp.toPx(),
-                                    size.height * 0.55f +
-                                            row * 10.dp.toPx()
+                                    15.dp.toPx() + column * 10.dp.toPx(),
+                                    size.height * 0.55f + row * 10.dp.toPx()
                                 )
                             )
                         }
@@ -579,21 +638,15 @@ private fun PatternBackground(
     }
 }
 
-// PROFILE ICON
 @Composable
 private fun ProfileIcon() {
-    Canvas(
-        modifier = Modifier.size(27.dp)
-    ) {
+    Canvas(modifier = Modifier.size(27.dp)) {
         val strokeWidth = 2.dp.toPx()
 
         drawCircle(
             color = White,
             radius = size.width * 0.16f,
-            center = Offset(
-                size.width / 2,
-                size.height * 0.30f
-            )
+            center = Offset(size.width / 2, size.height * 0.30f)
         )
 
         drawArc(
@@ -601,10 +654,7 @@ private fun ProfileIcon() {
             startAngle = 180f,
             sweepAngle = 180f,
             useCenter = false,
-            topLeft = Offset(
-                size.width * 0.16f,
-                size.height * 0.43f
-            ),
+            topLeft = Offset(size.width * 0.16f, size.height * 0.43f),
             size = androidx.compose.ui.geometry.Size(
                 size.width * 0.68f,
                 size.height * 0.65f
@@ -614,7 +664,6 @@ private fun ProfileIcon() {
     }
 }
 
-// DASHBOARD BUTTON
 @Composable
 private fun DashboardButton(
     title: String,
@@ -643,11 +692,8 @@ private fun DashboardButton(
     }
 }
 
-// BACK BUTTON
 @Composable
-private fun BackButton(
-    onClick: () -> Unit
-) {
+private fun BackButton(onClick: () -> Unit) {
     TextButton(onClick = onClick) {
         Text(
             "← Back",
@@ -657,7 +703,6 @@ private fun BackButton(
     }
 }
 
-// INFORMATION CARD
 @Composable
 private fun InfoCard(
     title: String,
@@ -672,9 +717,7 @@ private fun InfoCard(
             containerColor = White
         )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 title,
                 fontSize = 16.sp,
@@ -693,11 +736,8 @@ private fun InfoCard(
     }
 }
 
-// EMPTY MESSAGE
 @Composable
-private fun EmptyMessage(
-    message: String
-) {
+private fun EmptyMessage(message: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),

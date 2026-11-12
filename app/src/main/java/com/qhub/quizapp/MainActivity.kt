@@ -1,3 +1,4 @@
+
 package com.qhub.quizapp
 
 import android.content.Context
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.qhub.quizapp.student.StudentDashboard
 
 // ----------------------------------------------------
 // QHUB COLOURS
@@ -52,7 +54,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-
             MaterialTheme(
                 colorScheme = lightColorScheme(
                     primary = DeepBlue,
@@ -68,7 +69,6 @@ class MainActivity : ComponentActivity() {
                     outline = Beige
                 )
             ) {
-
                 QHubLoginScreen()
             }
         }
@@ -109,7 +109,7 @@ fun QHubLoginScreen() {
         mutableStateOf(false)
     }
 
-    // Dashboard navigation state
+    // TEACHER NAVIGATION STATES
 
     var showTeacherDashboard by remember {
         mutableStateOf(false)
@@ -123,7 +123,213 @@ fun QHubLoginScreen() {
         mutableStateOf("")
     }
 
-    // Show teacher dashboard after successful login
+    // STUDENT NAVIGATION STATES
+
+    var showStudentDashboard by remember {
+        mutableStateOf(false)
+    }
+
+    var showStudentDetails by remember {
+        mutableStateOf(false)
+    }
+
+    var studentEmail by remember {
+        mutableStateOf("")
+    }
+
+    // Stores existing student details while editing
+
+    var editingStudentDetails by remember {
+        mutableStateOf<StudentDetails?>(null)
+    }
+
+    // ------------------------------------------------
+    // STUDENT DASHBOARD
+    // ------------------------------------------------
+
+    if (showStudentDashboard) {
+
+        StudentDashboard(
+
+            onLogout = {
+
+                auth.signOut()
+
+                showStudentDashboard = false
+                showStudentDetails = false
+                editingStudentDetails = null
+
+                selectedRole = "Student"
+                email = ""
+                password = ""
+                name = ""
+                isRegistering = false
+
+                Toast.makeText(
+                    context,
+                    "Logged out successfully",
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+
+            // OPEN EDIT PROFILE
+
+            onEditProfile = { details ->
+
+                editingStudentDetails = details
+                studentEmail = details.email
+
+                showStudentDashboard = false
+                showStudentDetails = true
+            }
+        )
+
+        return
+    }
+
+    // ------------------------------------------------
+    // STUDENT DETAILS / EDIT PROFILE PAGE
+    // ------------------------------------------------
+
+    if (showStudentDetails) {
+
+        StudentDetailsScreen(
+
+            email = studentEmail,
+
+            // If editing, existing details are prefilled.
+            // If first-time login, this will be null.
+
+            existingDetails = editingStudentDetails,
+
+            // Cancel editing and return to dashboard.
+
+            onBack = {
+
+                editingStudentDetails = null
+                showStudentDetails = false
+                showStudentDashboard = true
+            },
+
+            onSave = {
+                    studentName,
+                    roll,
+                    dept,
+                    sec,
+                    sem ->
+
+                val user = auth.currentUser
+
+                if (user == null) {
+
+                    Toast.makeText(
+                        context,
+                        "Please login again",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                } else {
+
+                    isLoading = true
+
+                    val repository = StudentRepository()
+
+                    // --------------------------------
+                    // EDIT EXISTING STUDENT PROFILE
+                    // --------------------------------
+
+                    if (editingStudentDetails != null) {
+
+                        repository.updateStudentDetails(
+
+                            uid = user.uid,
+
+                            name = studentName,
+                            rollNumber = roll,
+                            department = dept,
+                            section = sec,
+                            semester = sem,
+
+                            onSuccess = {
+
+                                isLoading = false
+
+                                editingStudentDetails = null
+                                showStudentDetails = false
+                                showStudentDashboard = true
+
+                                Toast.makeText(
+                                    context,
+                                    "Profile updated successfully!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+
+                            onFailure = { error ->
+
+                                isLoading = false
+
+                                Toast.makeText(
+                                    context,
+                                    error,
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+
+                    } else {
+
+                        // --------------------------------
+                        // FIRST-TIME STUDENT DETAILS SAVE
+                        // --------------------------------
+
+                        repository.verifyAndSaveStudent(
+
+                            uid = user.uid,
+
+                            name = studentName,
+                            rollNumber = roll,
+                            email = studentEmail,
+                            department = dept,
+                            section = sec,
+                            semester = sem,
+
+                            onSuccess = {
+
+                                isLoading = false
+
+                                showStudentDetails = false
+                                showStudentDashboard = true
+
+                                Toast.makeText(
+                                    context,
+                                    "Student details saved successfully",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+
+                            onFailure = { error ->
+
+                                isLoading = false
+
+                                Toast.makeText(
+                                    context,
+                                    error,
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+                    }
+                }
+            }
+        )
+
+        return
+    }
+
+    // ------------------------------------------------
+    // TEACHER DASHBOARD
+    // ------------------------------------------------
 
     if (showTeacherDashboard) {
 
@@ -151,7 +357,9 @@ fun QHubLoginScreen() {
         return
     }
 
+    // ------------------------------------------------
     // LOGIN SCREEN UI
+    // ------------------------------------------------
 
     Box(
         modifier = Modifier
@@ -370,8 +578,6 @@ fun QHubLoginScreen() {
                                     Toast.LENGTH_LONG
                                 ).show()
 
-                                // Return to login screen
-
                                 isRegistering = false
                                 name = ""
 
@@ -418,8 +624,7 @@ fun QHubLoginScreen() {
                                 if (savedRole == "Teacher") {
 
                                     teacherName =
-                                        user?.displayName
-                                            ?: "Teacher"
+                                        user?.displayName ?: "Teacher"
 
                                     teacherEmail =
                                         user?.email ?: email
@@ -434,15 +639,67 @@ fun QHubLoginScreen() {
 
                                 } else {
 
-                                    // Student dashboard will be developed separately.
+                                    // STUDENT LOGIN
 
-                                    auth.signOut()
+                                    if (user == null) {
 
-                                    Toast.makeText(
-                                        context,
-                                        "Student dashboard will be available soon.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                        Toast.makeText(
+                                            context,
+                                            "Unable to get student account",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+
+                                        auth.signOut()
+
+                                        return@addOnCompleteListener
+                                    }
+
+                                    studentEmail =
+                                        user.email ?: email.trim()
+
+                                    isLoading = true
+
+                                    StudentRepository().getStudentDetails(
+
+                                        uid = user.uid,
+
+                                        onSuccess = {
+
+                                            isLoading = false
+
+                                            editingStudentDetails = null
+                                            showStudentDashboard = true
+
+                                            Toast.makeText(
+                                                context,
+                                                "Welcome back!",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+
+                                        onFailure = { error ->
+
+                                            isLoading = false
+
+                                            if (
+                                                error == "Student details not found."
+                                            ) {
+
+                                                editingStudentDetails = null
+                                                showStudentDetails = true
+
+                                            } else {
+
+                                                Toast.makeText(
+                                                    context,
+                                                    error,
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+
+                                                auth.signOut()
+                                            }
+                                        }
+                                    )
                                 }
 
                             } else {
@@ -557,7 +814,6 @@ fun QHubLogo() {
         modifier = Modifier
             .fillMaxWidth()
             .height(135.dp),
-
         contentAlignment = Alignment.Center
     ) {
 
@@ -707,7 +963,6 @@ fun QHubBackgroundPattern() {
                 drawCircle(
                     color = Beige.copy(alpha = 0.45f),
                     radius = 2.5.dp.toPx(),
-
                     center = Offset(
                         w - 58.dp.toPx() + i * 12.dp.toPx(),
                         55.dp.toPx() + j * 12.dp.toPx()
@@ -732,9 +987,7 @@ fun RoleButton(
 
     Button(
         onClick = onClick,
-
         modifier = modifier.height(50.dp),
-
         shape = RoundedCornerShape(14.dp),
 
         colors = ButtonDefaults.buttonColors(
@@ -771,7 +1024,6 @@ fun QHubTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-
         modifier = Modifier.fillMaxWidth(),
 
         label = {
