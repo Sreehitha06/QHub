@@ -62,7 +62,11 @@ fun StudentQuizListScreen(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(quizzes, key = { it.quizId }) { record ->
+                items(
+                    quizzes,
+                    key = { "${it.teacherId}_${it.classId}_${it.quizId}" }
+                ) { record ->
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
@@ -70,19 +74,40 @@ fun StudentQuizListScreen(
                             containerColor = QuizWhite
                         )
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            // Quiz name
                             Text(
-                                record.subjectName,
+                                text = record.quiz?.title
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: "Untitled Quiz",
                                 color = QuizBlue,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
                             )
 
+                            Spacer(modifier = Modifier.height(5.dp))
+
+                            // Subject name
                             Text(
-                                record.unitName,
-                                color = QuizBlueGray
+                                text = "Subject: ${record.subjectName}",
+                                color = QuizBlueGray,
+                                style = MaterialTheme.typography.bodyMedium
                             )
+
+                            if (record.unitName.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Text(
+                                    text = "Unit: ${record.unitName}",
+                                    color = QuizBlueGray
+                                )
+                            }
 
                             if (showMarks) {
+                                Spacer(modifier = Modifier.height(8.dp))
+
                                 Text(
                                     "Marks: ${record.marksObtained ?: 0}/${record.totalMarks ?: 0}",
                                     color = QuizBlue,
@@ -91,10 +116,13 @@ fun StudentQuizListScreen(
                             }
 
                             if (showSchedule) {
+                                Spacer(modifier = Modifier.height(8.dp))
+
                                 Text(
                                     "Date: ${record.scheduledDate}",
                                     color = QuizBlueGray
                                 )
+
                                 Text(
                                     "Time: ${record.scheduledTime}",
                                     color = QuizBlueGray
@@ -103,12 +131,17 @@ fun StudentQuizListScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 Button(
-                                    onClick = { onAttemptQuiz(record) },
+                                    onClick = {
+                                        onAttemptQuiz(record)
+                                    },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = QuizBlue
                                     )
                                 ) {
-                                    Text("Attempt Quiz", color = QuizWhite)
+                                    Text(
+                                        "Attempt Quiz",
+                                        color = QuizWhite
+                                    )
                                 }
                             }
                         }
@@ -118,4 +151,3 @@ fun StudentQuizListScreen(
         }
     }
 }
-

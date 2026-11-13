@@ -56,7 +56,10 @@ fun StudentDashboard(
         mutableStateOf(false)
     }
 
-    // Student quiz loading states
+    var submissionError by remember {
+        mutableStateOf("")
+    }
+
     var studentQuizRecords by remember {
         mutableStateOf<List<StudentQuizRecord>>(emptyList())
     }
@@ -69,7 +72,6 @@ fun StudentDashboard(
         mutableStateOf("")
     }
 
-    // Firebase subject enrollment states
     var studentEnrollments by remember {
         mutableStateOf<List<StudentEnrollment>>(emptyList())
     }
@@ -86,7 +88,6 @@ fun StudentDashboard(
         StudentRepository()
     }
 
-    // Load quizzes from Firebase.
     fun loadStudentQuizzes() {
         quizzesLoading = true
         quizzesError = ""
@@ -104,7 +105,6 @@ fun StudentDashboard(
         )
     }
 
-    // Fetch subjects and quizzes whenever their screens open.
     LaunchedEffect(currentScreen) {
 
         if (currentScreen == "semester") {
@@ -258,12 +258,10 @@ fun StudentDashboard(
                             groupedEnrollments.forEach { (semester, enrollments) ->
 
                                 Text(
-                                    semester.let {
-                                        if (it == "Semester not specified") {
-                                            it
-                                        } else {
-                                            "Semester $it"
-                                        }
+                                    if (semester == "Semester not specified") {
+                                        semester
+                                    } else {
+                                        "Semester $semester"
                                     },
                                     fontSize = 19.sp,
                                     fontWeight = FontWeight.Bold,
@@ -407,24 +405,45 @@ fun StudentDashboard(
             if (quiz != null) {
                 QuizScreen(
                     quiz = quiz,
-                    onSubmit = { answers ->
+                    onSubmit = { answers: List<Int> ->
+
                         submittedAnswers = answers
+                        submissionError = ""
 
-                        val marks = quiz.questions.indices.count { index ->
-                            answers.getOrNull(index) ==
-                                    quiz.questions[index].correctAnswerIndex
-                        }
+                        val record = selectedRecord
 
-                        selectedRecord?.let { record ->
-                            StudentQuizRepository.saveAttemptedQuiz(
-                                record.copy(
-                                    marksObtained = marks,
-                                    totalMarks = quiz.questions.size
-                                )
+                        if (record != null) {
+                            StudentQuizRepository.submitQuizAttempt(
+                                record = record,
+                                answers = answers,
+
+                                onSuccess = { attemptedRecord, correct, wrong, unanswered ->
+
+                                    selectedRecord = attemptedRecord
+
+                                    studentQuizRecords =
+                                        studentQuizRecords.map { existing ->
+                                            if (
+                                                existing.teacherId == attemptedRecord.teacherId &&
+                                                existing.classId == attemptedRecord.classId &&
+                                                existing.quizId == attemptedRecord.quizId
+                                            ) {
+                                                attemptedRecord
+                                            } else {
+                                                existing
+                                            }
+                                        }
+
+                                    currentScreen = "result"
+                                },
+
+                                onFailure = { error ->
+                                    submissionError = error
+                                }
                             )
+                        } else {
+                            submissionError = "Quiz information is unavailable."
                         }
-
-                        currentScreen = "result"
                     }
                 )
             } else {
@@ -579,6 +598,29 @@ fun StudentDashboard(
                 TextButton(
                     onClick = {
                         showQuizUnavailableDialog = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    if (submissionError.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = {
+                submissionError = ""
+            },
+            title = {
+                Text("Submission Failed")
+            },
+            text = {
+                Text(submissionError)
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        submissionError = ""
                     }
                 ) {
                     Text("OK")
