@@ -1,7 +1,12 @@
 
 package com.qhub.quizapp
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,37 +14,288 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.android.gms.tasks.Task
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.security.MessageDigest
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
+
+private data class QHubCsvStudent(
+    val name: String,
+    val rollNumber: String,
+    val department: String,
+    val section: String,
+    val email: String
+)
+
+private data class QHubTeacherClass(
+    val id: String,
+    val name: String
+)
 
 @Composable
 fun TeacherDashboard(
     onLogout: () -> Unit
 ) {
+    val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
+    val user = auth.currentUser
+    val uid = user?.uid
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
     var showProfile by remember { mutableStateOf(false) }
     var showCreateClass by remember { mutableStateOf(false) }
-    var isEditing by remember { mutableStateOf(false) }
+    var showCsvUpload by remember { mutableStateOf(false) }
+    var showCreateQuiz by remember { mutableStateOf(false) }
 
-    // Teacher profile details
-    var teacherName by remember { mutableStateOf("Teacher Name") }
-    val teacherEmail = "teacher@qhub.com"
+    var showManageQuizzes by remember { mutableStateOf(false) }
+
+    var teacherName by remember {
+        mutableStateOf(user?.displayName ?: "Teacher")
+    }
+
+    val teacherEmail = user?.email ?: "Email not available"
+
     var department by remember { mutableStateOf("Department Name") }
     var designation by remember { mutableStateOf("Faculty") }
 
-    // Temporary profile editing details
     var editName by remember { mutableStateOf("") }
     var editDepartment by remember { mutableStateOf("") }
     var editDesignation by remember { mutableStateOf("") }
+    var isEditing by remember { mutableStateOf(false) }
 
-    // Created classes
-    var classes by remember { mutableStateOf(listOf<String>()) }
+    var classes by remember {
+        mutableStateOf(listOf<QHubTeacherClass>())
+    }
+
+    var classesWithRoster by remember {
+        mutableStateOf(setOf<String>())
+    }
+
+    // NEW: Subject and semester contexts grouped by class.
+    var rosterContextsByClass by remember {
+        mutableStateOf<Map<String, List<QHubRosterContext>>>(emptyMap())
+    }
+
+    var selectedTeacherClass by remember {
+        mutableStateOf<QHubTeacherClass?>(null)
+    }
+
+    var selectedClassId by remember { mutableStateOf("") }
+    var selectedClass by remember { mutableStateOf("") }
+
     var newClassName by remember { mutableStateOf("") }
+    var subjectName by remember { mutableStateOf("") }
+    var semester by remember { mutableStateOf("") }
+
+    var isSaving by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var uploadMessage by remember { mutableStateOf<String?>(null) }
 
     val colors = MaterialTheme.colorScheme
+
+    // LISTEN TO CLASSES AND CSV ROSTERS
+    DisposableEffect(uid) {
+        var classRegistration: ListenerRegistration? = null
+        var rosterRegistration: ListenerRegistration? = null
+
+        if (uid != null) {
+            classRegistration = db.collection("teachers")
+                .document(uid)
+                .collection("classes")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        errorMessage = error.localizedMessage
+                            ?: "Could not load classes"
+                    } else if (snapshot != null) {
+                        classes = snapshot.documents.mapNotNull { document ->
+                            val name = document.getString("className")
+                            if (name != null) {
+                                QHubTeacherClass(document.id, name)
+                            } else {
+                                null
+                            }
+                        }
+                    }
+                }
+
+            rosterRegistration = db.collection("studentRoster")
+                .whereEqualTo("teacherId", uid)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        errorMessage = error.localizedMessage
+                            ?: "Could not check uploaded CSV files"
+                    } else if (snapshot != null) {
+
+                        val rosterDocuments = snapshot.documents
+
+                        classesWithRoster = rosterDocuments
+                            .mapNotNull { it.getString("classId") }
+                            .toSet()
+
+                        // Keep every subject-semester combination for each class.
+                        rosterContextsByClass = rosterDocuments
+                            .groupBy { document ->
+                                document.getString("classId").orEmpty()
+                            }
+                            .filterKeys { it.isNotBlank() }
+                            .mapValues { (_, documents) ->
+
+                                documents.mapNotNull { document ->
+                                    val subject = document
+                                        .getString("subjectName")
+                                        ?.trim()
+                                        .orEmpty()
+
+                                    val semesterValue = document
+                                        .getString("semester")
+                                        ?.trim()
+                                        .orEmpty()
+
+                                    if (
+                                        subject.isNotBlank() &&
+                                        semesterValue.isNotBlank()
+                                    ) {
+                                        QHubRosterContext(
+                                            subjectName = subject,
+                                            semester = semesterValue
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                }.distinctBy {
+                                    "${it.subjectName.lowercase()}|${it.semester.lowercase()}"
+                                }
+                            }
+                    }
+                }
+        } else {
+            errorMessage = "Please log in again."
+        }
+
+        onDispose {
+            classRegistration?.remove()
+            rosterRegistration?.remove()
+        }
+    }
+
+    // CSV PICKER
+    val csvPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            if (uid == null) {
+                uploadMessage = "Please log in again."
+                return@rememberLauncherForActivityResult
+            }
+
+            if (
+                selectedClassId.isBlank() ||
+                selectedClass.isBlank() ||
+                subjectName.isBlank() ||
+                semester.isBlank()
+            ) {
+                uploadMessage = "Enter class, subject and semester."
+                return@rememberLauncherForActivityResult
+            }
+
+            scope.launch {
+                isSaving = true
+                uploadMessage = "Reading CSV file..."
+
+                try {
+                    val students = withContext(Dispatchers.IO) {
+                        readQHubCsv(context, uri)
+                    }
+
+                    if (students.isEmpty()) {
+                        throw Exception("CSV contains no student records.")
+                    }
+
+                    uploadMessage = "Uploading ${students.size} students..."
+
+                    val normalizedSubject = subjectName.trim()
+                    val normalizedClass = selectedClass.trim()
+                    val normalizedSemester = semester.trim()
+                    val normalizedClassId = selectedClassId
+
+                    val teacherId = uid
+                    val email = teacherEmail
+
+                    val documents = students.map { student ->
+                        val key = listOf(
+                            teacherId,
+                            normalizedClassId,
+                            normalizedSubject.lowercase(),
+                            normalizedSemester.lowercase(),
+                            student.email.lowercase()
+                        ).joinToString("|")
+
+                        val documentId = sha256(key)
+
+                        val data = hashMapOf(
+                            "name" to student.name,
+                            "email" to student.email.trim().lowercase(),
+                            "rollNumber" to student.rollNumber.trim(),
+                            "department" to student.department.trim(),
+                            "section" to student.section.trim(),
+                            "classId" to normalizedClassId,
+                            "subjectName" to normalizedSubject,
+                            "className" to normalizedClass,
+                            "semester" to normalizedSemester,
+                            "teacherId" to teacherId,
+                            "teacherEmail" to email,
+                            "createdAt" to System.currentTimeMillis()
+                        )
+
+                        documentId to data
+                    }
+
+                    withContext(Dispatchers.IO) {
+                        documents.chunked(450).forEach { chunk ->
+                            val batch = db.batch()
+
+                            chunk.forEach { (documentId, data) ->
+                                val ref = db.collection("studentRoster")
+                                    .document(documentId)
+
+                                batch.set(ref, data)
+                            }
+
+                            batch.commit().awaitResult()
+                        }
+                    }
+
+                    uploadMessage =
+                        "Successfully uploaded ${students.size} students!"
+
+                } catch (e: Exception) {
+                    uploadMessage = e.localizedMessage
+                        ?: "CSV upload failed."
+                } finally {
+                    isSaving = false
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -57,7 +313,7 @@ fun TeacherDashboard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "QHub",
+                "QHub",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = colors.onPrimary
@@ -70,7 +326,7 @@ fun TeacherDashboard(
                 }
             ) {
                 Icon(
-                    imageVector = Icons.Default.AccountCircle,
+                    Icons.Default.AccountCircle,
                     contentDescription = "Teacher Profile",
                     tint = colors.onPrimary,
                     modifier = Modifier.size(32.dp)
@@ -78,174 +334,382 @@ fun TeacherDashboard(
             }
         }
 
-        // MAIN DASHBOARD
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "QHub",
-                style = MaterialTheme.typography.displayMedium,
-                fontWeight = FontWeight.Bold,
-                color = colors.primary
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Hello, Teacher!",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onBackground
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Welcome to your teaching dashboard",
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // CREATE CLASS CARD
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = colors.surface
-                ),
-                elevation = CardDefaults.cardElevation(
-                    defaultElevation = 2.dp
-                )
+        // DASHBOARD OR SELECTED CLASS
+        if (selectedTeacherClass == null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        tint = colors.primary,
-                        modifier = Modifier.size(38.dp)
-                    )
+                Text(
+                    "QHub",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primary
+                )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                Spacer(Modifier.height(16.dp))
 
-                    Text(
-                        text = "Create New Class",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.onSurface
-                    )
+                Text(
+                    "Hello, $teacherName!",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-                    Text(
-                        text = "Create and organise your classes in QHub.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant
-                    )
+                Text(
+                    "Welcome to your teaching dashboard",
+                    color = colors.onSurfaceVariant
+                )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                Spacer(Modifier.height(32.dp))
 
-                    Button(
-                        onClick = {
-                            newClassName = ""
-                            showCreateClass = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Text("Create Class")
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // CREATED CLASSES SECTION
-            Text(
-                text = "My Classes",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = colors.onBackground,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (classes.isEmpty()) {
+                // CREATE CLASS
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = colors.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(2.dp)
                 ) {
-                    Text(
-                        text = "No classes created yet. Tap Create Class to add your first class.",
+                    Column(
                         modifier = Modifier.padding(20.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(38.dp)
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Text(
+                            "Create New Class",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            "Create and organise your classes in QHub.",
+                            color = colors.onSurfaceVariant
+                        )
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Button(
+                            onClick = {
+                                newClassName = ""
+                                errorMessage = null
+                                showCreateClass = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Create Class")
+                        }
+                    }
                 }
-            } else {
-                classes.forEachIndexed { index, className ->
+
+                Spacer(Modifier.height(18.dp))
+
+                // CSV UPLOAD
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Default.UploadFile,
+                            contentDescription = null,
+                            tint = colors.primary,
+                            modifier = Modifier.size(38.dp)
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Text(
+                            "Upload Student CSV",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        Text(
+                            "Upload a student roster for a class, subject and semester.",
+                            color = colors.onSurfaceVariant
+                        )
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Button(
+                            onClick = {
+                                selectedClassId = ""
+                                selectedClass = ""
+                                subjectName = ""
+                                semester = ""
+                                uploadMessage = null
+                                showCsvUpload = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = classes.isNotEmpty()
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Upload CSV")
+                        }
+
+                        if (classes.isEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Create a class before uploading its roster.",
+                                color = colors.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(28.dp))
+
+                Text(
+                    "My Classes",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                if (classes.isEmpty()) {
                     Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = colors.surface
-                        ),
-                        elevation = CardDefaults.cardElevation(
-                            defaultElevation = 2.dp
+                            containerColor = colors.surfaceVariant
                         )
                     ) {
-                        Row(
+                        Text(
+                            "No classes created yet. Tap Create Class to add your first class.",
+                            modifier = Modifier.padding(20.dp),
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    classes.forEachIndexed { index, teacherClass ->
+                        val hasRoster = teacherClass.id in classesWithRoster
+
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(18.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(bottom = 12.dp)
+                                .clickable(enabled = hasRoster) {
+                                    selectedTeacherClass = teacherClass
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (hasRoster)
+                                    colors.surface
+                                else
+                                    colors.surfaceVariant
+                            ),
+                            elevation = CardDefaults.cardElevation(2.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = null,
-                                tint = colors.primary,
-                                modifier = Modifier.size(32.dp)
-                            )
-
-                            Spacer(modifier = Modifier.width(14.dp))
-
-                            Column {
-                                Text(
-                                    text = className,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.onSurface
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.AccountCircle,
+                                    contentDescription = null,
+                                    tint = if (hasRoster)
+                                        colors.primary
+                                    else
+                                        colors.onSurfaceVariant,
+                                    modifier = Modifier.size(32.dp)
                                 )
 
+                                Spacer(Modifier.width(14.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        teacherClass.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+
+                                    Text(
+                                        "Class ${index + 1}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.onSurfaceVariant
+                                    )
+
+                                    Spacer(Modifier.height(4.dp))
+
+                                    Text(
+                                        if (hasRoster) "CSV uploaded"
+                                        else "Upload CSV to unlock this class",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (hasRoster)
+                                            colors.primary
+                                        else
+                                            colors.error
+                                    )
+                                }
+
                                 Text(
-                                    text = "Class ${index + 1}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant
+                                    if (hasRoster) "Open →" else "Locked",
+                                    color = if (hasRoster)
+                                        colors.primary
+                                    else
+                                        colors.onSurfaceVariant
                                 )
                             }
                         }
                     }
+                }
+
+                errorMessage?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Text(it, color = colors.error)
+                }
+            }
+
+        } else {
+
+            // SELECTED CLASS NAVIGATION
+            val currentClass = selectedTeacherClass!!
+
+            when {
+
+                // MANAGE QUIZZES SCREEN
+                showManageQuizzes -> {
+                    val currentTeacherId = uid
+
+                    if (currentTeacherId != null) {
+                        ManageQuizzesScreen(
+                            teacherId = currentTeacherId,
+                            classId = currentClass.id,
+                            className = currentClass.name,
+                            onBack = {
+                                showManageQuizzes = false
+                            }
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                "Please log in again.",
+                                color = colors.error
+                            )
+
+                            Button(
+                                onClick = {
+                                    showManageQuizzes = false
+                                }
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+
+                // CREATE QUIZ SCREEN
+                showCreateQuiz -> {
+                    CreateQuizScreen(
+                        className = currentClass.name,
+
+                        availableRosterContexts =
+                            rosterContextsByClass[currentClass.id].orEmpty(),
+
+                        onBack = {
+                            showCreateQuiz = false
+                        },
+
+                        onSaveQuiz = {
+                                selectedSubject,
+                                selectedSemester,
+                                title,
+                                questions,
+                                duration,
+                                date,
+                                time,
+                                shuffleQuestions,
+                                shuffleOptions,
+                                onResult ->
+
+                            val teacherId = FirebaseAuth.getInstance()
+                                .currentUser?.uid
+
+                            if (teacherId == null) {
+                                onResult(false, "Please log in again.")
+                            } else {
+                                TeacherQuizRepository.saveQuiz(
+                                    teacherId = teacherId,
+                                    classId = currentClass.id,
+                                    className = currentClass.name,
+                                    subjectName = selectedSubject,
+                                    semester = selectedSemester,
+                                    title = title,
+                                    questions = questions,
+                                    durationMinutes = duration,
+                                    scheduledDate = date,
+                                    scheduledTime = time,
+                                    shuffleQuestions = shuffleQuestions,
+                                    shuffleOptions = shuffleOptions,
+
+                                    onSuccess = {
+                                        onResult(true, null)
+                                    },
+
+                                    onFailure = { error ->
+                                        onResult(false, error)
+                                    }
+                                )
+                            }
+                        }
+                    )
+                }
+
+                // CLASS HOME SCREEN
+                else -> {
+                    TeacherClassHomeScreen(
+                        teacherClass = currentClass,
+
+                        onBack = {
+                            selectedTeacherClass = null
+                            showCreateQuiz = false
+                            showManageQuizzes = false
+                        },
+
+                        onCreateQuiz = {
+                            showCreateQuiz = true
+                            showManageQuizzes = false
+                        },
+
+                        onManageQuizzes = {
+                            showManageQuizzes = true
+                            showCreateQuiz = false
+                        }
+                    )
                 }
             }
         }
@@ -255,59 +719,87 @@ fun TeacherDashboard(
     if (showCreateClass) {
         AlertDialog(
             onDismissRequest = {
-                showCreateClass = false
+                if (!isSaving) showCreateClass = false
             },
             title = {
-                Text(
-                    text = "Create New Class",
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Create New Class", fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
-                    Text(
-                        text = "Enter your class or subject name."
-                    )
+                    Text("Enter your class name.")
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(16.dp))
 
                     OutlinedTextField(
                         value = newClassName,
-                        onValueChange = {
-                            newClassName = it
-                        },
-                        label = {
-                            Text("Class / Subject Name")
-                        },
-                        placeholder = {
-                            Text("Example: Business Statistics")
-                        },
+                        onValueChange = { newClassName = it },
+                        label = { Text("Class Name") },
+                        placeholder = { Text("Example: BCA 2nd Year") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    errorMessage?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, color = colors.error)
+                    }
                 }
             },
             confirmButton = {
                 TextButton(
-                    enabled = newClassName.trim().isNotEmpty(),
+                    enabled = newClassName.isNotBlank() &&
+                            !isSaving && uid != null,
                     onClick = {
                         val className = newClassName.trim()
 
-                        if (className.isNotEmpty()) {
-                            classes = classes + className
-                            newClassName = ""
-                            showCreateClass = false
+                        if (uid == null) {
+                            errorMessage = "Please log in again."
+                            return@TextButton
                         }
+
+                        isSaving = true
+                        errorMessage = null
+
+                        val classData = hashMapOf(
+                            "className" to className,
+                            "teacherId" to uid,
+                            "teacherEmail" to teacherEmail,
+                            "createdAt" to System.currentTimeMillis()
+                        )
+
+                        db.collection("teachers")
+                            .document(uid)
+                            .collection("classes")
+                            .add(classData)
+                            .addOnSuccessListener {
+                                isSaving = false
+                                newClassName = ""
+                                showCreateClass = false
+                            }
+                            .addOnFailureListener { exception ->
+                                isSaving = false
+                                errorMessage = exception.localizedMessage
+                                    ?: "Could not save class"
+                            }
                     }
                 ) {
-                    Text("Create")
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Create")
+                    }
                 }
             },
             dismissButton = {
                 TextButton(
+                    enabled = !isSaving,
                     onClick = {
                         showCreateClass = false
                         newClassName = ""
+                        errorMessage = null
                     }
                 ) {
                     Text("Cancel")
@@ -316,7 +808,127 @@ fun TeacherDashboard(
         )
     }
 
-    // TEACHER PROFILE DIALOG
+    // CSV UPLOAD DIALOG
+    if (showCsvUpload) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isSaving) showCsvUpload = false
+            },
+            title = {
+                Text("Upload Student CSV", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 500.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Choose the class for this roster.")
+
+                    var expanded by remember { mutableStateOf(false) }
+
+                    Box {
+                        OutlinedButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (selectedClass.isBlank())
+                                    "Select Class"
+                                else
+                                    selectedClass
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            classes.forEach { teacherClass ->
+                                DropdownMenuItem(
+                                    text = { Text(teacherClass.name) },
+                                    onClick = {
+                                        selectedClassId = teacherClass.id
+                                        selectedClass = teacherClass.name
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = subjectName,
+                        onValueChange = { subjectName = it },
+                        label = { Text("Subject Name") },
+                        placeholder = { Text("Example: Mathematics") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = semester,
+                        onValueChange = { semester = it },
+                        label = { Text("Semester") },
+                        placeholder = { Text("Example: Semester 3") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text(
+                        "CSV columns required: Full Name, Roll Number, Department, Section, Email",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant
+                    )
+
+                    uploadMessage?.let {
+                        Text(
+                            it,
+                            color = if (it.startsWith("Successfully"))
+                                colors.primary
+                            else
+                                colors.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isSaving &&
+                            selectedClassId.isNotBlank() &&
+                            subjectName.isNotBlank() &&
+                            semester.isNotBlank(),
+                    onClick = {
+                        csvPicker.launch(arrayOf("*/*"))
+                    }
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Choose CSV File")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = {
+                        showCsvUpload = false
+                        uploadMessage = null
+                    }
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // TEACHER PROFILE
     if (showProfile) {
         AlertDialog(
             onDismissRequest = {
@@ -325,9 +937,7 @@ fun TeacherDashboard(
             },
             title = {
                 Text(
-                    text = if (isEditing) "Edit Profile"
-                    else "Teacher Profile",
-                    style = MaterialTheme.typography.headlineSmall,
+                    if (isEditing) "Edit Profile" else "Teacher Profile",
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -339,7 +949,7 @@ fun TeacherDashboard(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AccountCircle,
+                        Icons.Default.AccountCircle,
                         contentDescription = null,
                         tint = colors.primary,
                         modifier = Modifier
@@ -381,25 +991,10 @@ fun TeacherDashboard(
                             singleLine = true
                         )
                     } else {
-                        QHubTeacherProfileDetailRow(
-                            label = "Teacher Name",
-                            value = teacherName
-                        )
-
-                        QHubTeacherProfileDetailRow(
-                            label = "Email ID",
-                            value = teacherEmail
-                        )
-
-                        QHubTeacherProfileDetailRow(
-                            label = "Department",
-                            value = department
-                        )
-
-                        QHubTeacherProfileDetailRow(
-                            label = "Designation",
-                            value = designation
-                        )
+                        QHubTeacherProfileDetailRow("Teacher Name", teacherName)
+                        QHubTeacherProfileDetailRow("Email ID", teacherEmail)
+                        QHubTeacherProfileDetailRow("Department", department)
+                        QHubTeacherProfileDetailRow("Designation", designation)
                     }
                 }
             },
@@ -407,7 +1002,18 @@ fun TeacherDashboard(
                 if (isEditing) {
                     TextButton(
                         onClick = {
-                            teacherName = editName.trim()
+                            if (editName.isNotBlank()) {
+                                teacherName = editName.trim()
+
+                                val updates =
+                                    com.google.firebase.auth
+                                        .UserProfileChangeRequest.Builder()
+                                        .setDisplayName(teacherName)
+                                        .build()
+
+                                auth.currentUser?.updateProfile(updates)
+                            }
+
                             department = editDepartment.trim()
                             designation = editDesignation.trim()
                             isEditing = false
@@ -430,26 +1036,12 @@ fun TeacherDashboard(
             },
             dismissButton = {
                 if (isEditing) {
-                    TextButton(
-                        onClick = {
-                            editName = teacherName
-                            editDepartment = department
-                            editDesignation = designation
-                            isEditing = false
-                        }
-                    ) {
+                    TextButton(onClick = { isEditing = false }) {
                         Text("Cancel")
                     }
                 } else {
-                    Row(
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = {
-                                showProfile = false
-                            }
-                        ) {
+                    Row {
+                        TextButton(onClick = { showProfile = false }) {
                             Text("Close")
                         }
 
@@ -459,10 +1051,7 @@ fun TeacherDashboard(
                                 onLogout()
                             }
                         ) {
-                            Text(
-                                text = "Logout",
-                                color = colors.error
-                            )
+                            Text("Logout", color = colors.error)
                         }
                     }
                 }
@@ -471,7 +1060,346 @@ fun TeacherDashboard(
     }
 }
 
-// REUSABLE TEACHER PROFILE INFORMATION
+// CLASS HOME SCREEN
+@Composable
+private fun TeacherClassHomeScreen(
+    teacherClass: QHubTeacherClass,
+    onBack: () -> Unit,
+    onCreateQuiz: () -> Unit,
+    onManageQuizzes: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp)
+    ) {
+        TextButton(onClick = onBack) {
+            Icon(Icons.Default.ArrowBack, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Back to Dashboard")
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            teacherClass.name,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = colors.primary
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            "Class Dashboard",
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            "Manage quizzes and student performance for this class.",
+            color = colors.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(32.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            elevation = CardDefaults.cardElevation(3.dp)
+        ) {
+            Column(modifier = Modifier.padding(22.dp)) {
+                Icon(
+                    Icons.Default.Quiz,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(42.dp)
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    "Create a Quiz",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    "Create a new quiz for ${teacherClass.name}. Add questions, four options, correct answers, duration and schedule.",
+                    color = colors.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = onCreateQuiz,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create Quiz")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            elevation = CardDefaults.cardElevation(3.dp)
+        ) {
+            Column(modifier = Modifier.padding(22.dp)) {
+                Icon(
+                    Icons.Default.Assessment,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(42.dp)
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    "Manage Quizzes",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    "View quizzes created for ${teacherClass.name}, manage them and check the marks of students who have attempted each quiz.",
+                    color = colors.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                OutlinedButton(
+                    onClick = onManageQuizzes,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Assessment, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Manage Quizzes")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "Class ID: ${teacherClass.id}",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.onSurfaceVariant
+        )
+    }
+}
+
+// CSV READER
+private fun readQHubCsv(
+    context: Context,
+    uri: Uri
+): List<QHubCsvStudent> {
+    val text = context.contentResolver.openInputStream(uri)
+        ?.bufferedReader(Charsets.UTF_8)
+        ?.use { it.readText() }
+        ?: throw Exception("Could not read selected CSV file.")
+
+    val rows = parseQHubCsv(text)
+
+    if (rows.isEmpty()) {
+        throw Exception("CSV file is empty.")
+    }
+
+    val headers = rows.first().map {
+        it.trim().removePrefix("\uFEFF").lowercase()
+    }
+
+    fun headerIndex(vararg names: String): Int {
+        return headers.indexOfFirst { it in names }
+    }
+
+    val nameIndex = headerIndex("full name", "name", "student name")
+    val rollIndex = headerIndex("roll number", "rollnumber", "roll no", "rollno")
+    val departmentIndex = headerIndex("department", "dept")
+    val sectionIndex = headerIndex("section")
+    val emailIndex = headerIndex("email", "email id", "email address")
+
+    if (
+        listOf(
+            nameIndex,
+            rollIndex,
+            departmentIndex,
+            sectionIndex,
+            emailIndex
+        ).any { it == -1 }
+    ) {
+        throw Exception(
+            "Missing CSV headers. Required: Full Name, Roll Number, Department, Section, Email."
+        )
+    }
+
+    val students = mutableListOf<QHubCsvStudent>()
+    val seenEmails = mutableSetOf<String>()
+
+    rows.drop(1).forEachIndexed { index, row ->
+        if (row.all { it.isBlank() }) return@forEachIndexed
+
+        val requiredIndex = listOf(
+            nameIndex,
+            rollIndex,
+            departmentIndex,
+            sectionIndex,
+            emailIndex
+        ).maxOrNull() ?: 0
+
+        if (row.size <= requiredIndex) {
+            throw Exception("Invalid data on CSV row ${index + 2}.")
+        }
+
+        val name = row[nameIndex].trim()
+        val roll = row[rollIndex].trim()
+        val dept = row[departmentIndex].trim()
+        val section = row[sectionIndex].trim()
+        val email = row[emailIndex].trim().lowercase()
+
+        if (
+            name.isBlank() ||
+            roll.isBlank() ||
+            dept.isBlank() ||
+            section.isBlank() ||
+            email.isBlank()
+        ) {
+            throw Exception("Missing student details on CSV row ${index + 2}.")
+        }
+
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            throw Exception("Invalid email on CSV row ${index + 2}: $email")
+        }
+
+        if (!seenEmails.add(email)) {
+            throw Exception("Duplicate email in CSV: $email")
+        }
+
+        students.add(
+            QHubCsvStudent(
+                name = name,
+                rollNumber = roll,
+                department = dept,
+                section = section,
+                email = email
+            )
+        )
+    }
+
+    return students
+}
+
+// CSV PARSER
+private fun parseQHubCsv(text: String): List<List<String>> {
+    val rows = mutableListOf<List<String>>()
+    val row = mutableListOf<String>()
+    val field = StringBuilder()
+
+    var insideQuotes = false
+    var index = 0
+
+    while (index < text.length) {
+        val char = text[index]
+
+        when {
+            char == '"' &&
+                    insideQuotes &&
+                    index + 1 < text.length &&
+                    text[index + 1] == '"' -> {
+                field.append('"')
+                index++
+            }
+
+            char == '"' -> {
+                insideQuotes = !insideQuotes
+            }
+
+            char == ',' && !insideQuotes -> {
+                row.add(field.toString())
+                field.clear()
+            }
+
+            (char == '\n' || char == '\r') && !insideQuotes -> {
+                row.add(field.toString())
+                field.clear()
+
+                if (row.any { it.isNotBlank() }) {
+                    rows.add(row.toList())
+                }
+
+                row.clear()
+
+                if (
+                    char == '\r' &&
+                    index + 1 < text.length &&
+                    text[index + 1] == '\n'
+                ) {
+                    index++
+                }
+            }
+
+            else -> field.append(char)
+        }
+
+        index++
+    }
+
+    if (insideQuotes) {
+        throw Exception("CSV has an unclosed quotation mark.")
+    }
+
+    if (field.isNotEmpty() || row.isNotEmpty()) {
+        row.add(field.toString())
+        rows.add(row.toList())
+    }
+
+    return rows
+}
+
+// SHA-256
+private fun sha256(value: String): String {
+    val bytes = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+
+    return bytes.joinToString("") {
+        "%02x".format(it)
+    }
+}
+
+// FIREBASE TASK AWAIT
+private suspend fun <T> Task<T>.awaitResult(): T =
+    suspendCoroutine { continuation ->
+        addOnSuccessListener { result ->
+            continuation.resume(result)
+        }
+
+        addOnFailureListener { exception ->
+            continuation.resumeWithException(exception)
+        }
+
+        addOnCanceledListener {
+            continuation.resumeWithException(
+                Exception("Firebase operation was cancelled.")
+            )
+        }
+    }
+
+// TEACHER PROFILE DETAIL
 @Composable
 fun QHubTeacherProfileDetailRow(
     label: String,
@@ -481,13 +1409,13 @@ fun QHubTeacherProfileDetailRow(
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Text(
-            text = label,
+            label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Text(
-            text = value,
+            value,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface

@@ -1,7 +1,5 @@
+
 package com.qhub.quizapp.data
-
-
-import com.qhub.quizapp.data.Quiz
 
 enum class StudentQuizStatus {
     UPCOMING,
@@ -18,5 +16,7 @@ data class StudentQuizRecord(
     val scheduledDate: String = "",
     val scheduledTime: String = "",
     val marksObtained: Int? = null,
-    val totalMarks: Int? = null
+    val totalMarks: Int? = null,
+    val teacherId: String = "",
+    val classId: String = ""
 )

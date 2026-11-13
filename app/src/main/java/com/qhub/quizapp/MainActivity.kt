@@ -1,11 +1,14 @@
 
 package com.qhub.quizapp
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -30,14 +33,28 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.qhub.quizapp.student.StudentDashboard
+
+// ----------------------------------------------------
+// QHUB COLOURS
+// ----------------------------------------------------
 
 private val White = Color(0xFFFFFFFF)
 private val Beige = Color(0xFFE6D5C3)
 private val LightBeige = Color(0xFFF5EDE4)
 private val BlueGray = Color(0xFF6F8B9B)
 private val DeepBlue = Color(0xFF2B4C63)
+
+// ----------------------------------------------------
+// MAIN ACTIVITY
+// ----------------------------------------------------
 
 class MainActivity : ComponentActivity() {
 
@@ -48,9 +65,16 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(
                 colorScheme = lightColorScheme(
                     primary = DeepBlue,
+                    onPrimary = White,
                     secondary = BlueGray,
+                    onSecondary = White,
                     background = White,
-                    surface = White
+                    onBackground = DeepBlue,
+                    surface = White,
+                    onSurface = DeepBlue,
+                    surfaceVariant = LightBeige,
+                    onSurfaceVariant = BlueGray,
+                    outline = Beige
                 )
             ) {
                 QHubLoginScreen()
@@ -69,12 +93,489 @@ fun QHubLoginScreen() {
     val auth = FirebaseAuth.getInstance()
     val context = LocalContext.current
 
-    var selectedRole by remember { mutableStateOf("Student") }
-    var isRegistering by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    var selectedRole by remember {
+        mutableStateOf("Student")
+    }
+
+    var isRegistering by remember {
+        mutableStateOf(false)
+    }
+
+    var name by remember {
+        mutableStateOf("")
+    }
+
+    var email by remember {
+        mutableStateOf("")
+    }
+
+    var password by remember {
+        mutableStateOf("")
+    }
+
+    var isLoading by remember {
+        mutableStateOf(false)
+    }
+
+    // TEACHER NAVIGATION STATES
+
+    var showTeacherDashboard by remember {
+        mutableStateOf(false)
+    }
+
+    var teacherName by remember {
+        mutableStateOf("Teacher")
+    }
+
+    var teacherEmail by remember {
+        mutableStateOf("")
+    }
+
+    // STUDENT NAVIGATION STATES
+
+    var showStudentDashboard by remember {
+        mutableStateOf(false)
+    }
+
+    var showStudentDetails by remember {
+        mutableStateOf(false)
+    }
+
+    var studentEmail by remember {
+        mutableStateOf("")
+    }
+
+    var editingStudentDetails by remember {
+        mutableStateOf<StudentDetails?>(null)
+    }
+
+    // ------------------------------------------------
+    // COMMON STUDENT LOGIN HANDLER
+    // ------------------------------------------------
+
+    fun openStudentAccount(user: FirebaseUser?) {
+
+        if (user == null) {
+
+            isLoading = false
+
+            Toast.makeText(
+                context,
+                "Unable to get student account",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            auth.signOut()
+            return
+        }
+
+        studentEmail = user.email ?: ""
+
+        if (studentEmail.isBlank()) {
+
+            isLoading = false
+
+            Toast.makeText(
+                context,
+                "Unable to retrieve your Google account email",
+                Toast.LENGTH_LONG
+            ).show()
+
+            auth.signOut()
+            return
+        }
+
+        // Save this account as a Student account.
+
+        context.getSharedPreferences(
+            "QHubPrefs",
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString("role_${user.uid}", "Student")
+            .apply()
+
+        isLoading = true
+
+        StudentRepository().getStudentDetails(
+
+            uid = user.uid,
+
+            onSuccess = {
+
+                isLoading = false
+
+                editingStudentDetails = null
+                showStudentDetails = false
+                showStudentDashboard = true
+
+                Toast.makeText(
+                    context,
+                    "Welcome back!",
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+
+            onFailure = { error ->
+
+                isLoading = false
+
+                if (error == "Student details not found.") {
+
+                    // First-time student login.
+                    // Open the existing student details page.
+
+                    editingStudentDetails = null
+                    showStudentDetails = true
+
+                } else {
+
+                    Toast.makeText(
+                        context,
+                        error,
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                    auth.signOut()
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------
+    // GOOGLE SIGN-IN CONFIGURATION
+    // ------------------------------------------------
+
+    val googleSignInClient = remember(context) {
+
+        val googleSignInOptions =
+            GoogleSignInOptions.Builder(
+                GoogleSignInOptions.DEFAULT_SIGN_IN
+            )
+                .requestIdToken(
+                    context.getString(R.string.default_web_client_id)
+                )
+                .requestEmail()
+                .build()
+
+        GoogleSignIn.getClient(
+            context,
+            googleSignInOptions
+        )
+    }
+
+    // ------------------------------------------------
+    // GOOGLE SIGN-IN RESULT
+    // ------------------------------------------------
+
+    val googleSignInLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+
+            if (result.resultCode == Activity.RESULT_OK) {
+
+                try {
+
+                    val accountTask =
+                        GoogleSignIn.getSignedInAccountFromIntent(
+                            result.data
+                        )
+
+                    val account = accountTask.getResult(
+                        ApiException::class.java
+                    )
+
+                    val idToken = account.idToken
+
+                    if (idToken.isNullOrBlank()) {
+
+                        isLoading = false
+
+                        Toast.makeText(
+                            context,
+                            "Google authentication token is missing",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                    } else {
+
+                        val credential =
+                            GoogleAuthProvider.getCredential(
+                                idToken,
+                                null
+                            )
+
+                        // Authenticate Google account with Firebase.
+
+                        auth.signInWithCredential(credential)
+                            .addOnCompleteListener { task ->
+
+                                if (task.isSuccessful) {
+
+                                    openStudentAccount(
+                                        auth.currentUser
+                                    )
+
+                                } else {
+
+                                    isLoading = false
+
+                                    Toast.makeText(
+                                        context,
+                                        task.exception?.message
+                                            ?: "Google login failed",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                    }
+
+                } catch (e: ApiException) {
+
+                    isLoading = false
+
+                    Toast.makeText(
+                        context,
+                        e.message ?: "Google Sign-In failed",
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                } catch (e: Exception) {
+
+                    isLoading = false
+
+                    Toast.makeText(
+                        context,
+                        e.message ?: "Something went wrong",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+
+            } else {
+
+                isLoading = false
+
+                Toast.makeText(
+                    context,
+                    "Google sign-in cancelled",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+    // ------------------------------------------------
+    // STUDENT DASHBOARD
+    // ------------------------------------------------
+
+    if (showStudentDashboard) {
+
+        StudentDashboard(
+
+            onLogout = {
+
+                auth.signOut()
+
+                showStudentDashboard = false
+                showStudentDetails = false
+                editingStudentDetails = null
+
+                selectedRole = "Student"
+                email = ""
+                password = ""
+                name = ""
+                isRegistering = false
+
+                Toast.makeText(
+                    context,
+                    "Logged out successfully",
+                    Toast.LENGTH_SHORT
+                ).show()
+            },
+
+            onEditProfile = { details ->
+
+                editingStudentDetails = details
+                studentEmail = details.email
+
+                showStudentDashboard = false
+                showStudentDetails = true
+            }
+        )
+
+        return
+    }
+
+    // ------------------------------------------------
+    // STUDENT DETAILS / EDIT PROFILE PAGE
+    // ------------------------------------------------
+
+    if (showStudentDetails) {
+
+        StudentDetailsScreen(
+
+            email = studentEmail,
+
+            existingDetails = editingStudentDetails,
+
+            onBack = {
+
+                editingStudentDetails = null
+                showStudentDetails = false
+                showStudentDashboard = true
+            },
+
+            onSave = {
+                    studentName,
+                    roll,
+                    dept,
+                    sec,
+                    sem ->
+
+                val user = auth.currentUser
+
+                if (user == null) {
+
+                    Toast.makeText(
+                        context,
+                        "Please login again",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                } else {
+
+                    isLoading = true
+
+                    val repository = StudentRepository()
+
+                    if (editingStudentDetails != null) {
+
+                        // EDIT EXISTING STUDENT PROFILE
+
+                        repository.updateStudentDetails(
+
+                            uid = user.uid,
+
+                            name = studentName,
+                            rollNumber = roll,
+                            department = dept,
+                            section = sec,
+                            semester = sem,
+
+                            onSuccess = {
+
+                                isLoading = false
+
+                                editingStudentDetails = null
+                                showStudentDetails = false
+                                showStudentDashboard = true
+
+                                Toast.makeText(
+                                    context,
+                                    "Profile updated successfully!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+
+                            onFailure = { error ->
+
+                                isLoading = false
+
+                                Toast.makeText(
+                                    context,
+                                    error,
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+
+                    } else {
+
+                        // FIRST-TIME STUDENT DETAILS SAVE
+
+                        repository.verifyAndSaveStudent(
+
+                            uid = user.uid,
+
+                            name = studentName,
+                            rollNumber = roll,
+
+                            // USE THE CURRENT FIREBASE AUTHENTICATED EMAIL
+                            email = auth.currentUser
+                                ?.email
+                                ?.trim()
+                                ?.lowercase()
+                                .orEmpty(),
+
+                            department = dept,
+                            section = sec,
+                            semester = sem,
+
+                            onSuccess = {
+
+                                isLoading = false
+
+                                showStudentDetails = false
+                                showStudentDashboard = true
+
+                                Toast.makeText(
+                                    context,
+                                    "Student details saved successfully",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+
+                            onFailure = { error ->
+
+                                isLoading = false
+
+                                Toast.makeText(
+                                    context,
+                                    error,
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        )
+                    }
+                }
+            }
+        )
+
+        return
+    }
+
+    // ------------------------------------------------
+    // TEACHER DASHBOARD
+    // ------------------------------------------------
+
+    if (showTeacherDashboard) {
+
+        TeacherDashboard(
+            onLogout = {
+
+                auth.signOut()
+
+                showTeacherDashboard = false
+
+                selectedRole = "Student"
+                email = ""
+                password = ""
+                name = ""
+                isRegistering = false
+
+                Toast.makeText(
+                    context,
+                    "Logged out successfully",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        )
+
+        return
+    }
+
+    // ------------------------------------------------
+    // LOGIN SCREEN UI
+    // ------------------------------------------------
 
     Box(
         modifier = Modifier
@@ -95,7 +596,6 @@ fun QHubLoginScreen() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // QHub logo
             QHubLogo()
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -136,6 +636,7 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(24.dp))
 
             // ROLE SELECTOR
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -182,7 +683,8 @@ fun QHubLoginScreen() {
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            // NAME FIELD FOR REGISTRATION
+            // NAME FIELD
+
             if (isRegistering) {
 
                 QHubTextField(
@@ -195,6 +697,7 @@ fun QHubLoginScreen() {
             }
 
             // EMAIL FIELD
+
             QHubTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -205,6 +708,7 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(15.dp))
 
             // PASSWORD FIELD
+
             QHubTextField(
                 value = password,
                 onValueChange = { password = it },
@@ -215,10 +719,15 @@ fun QHubLoginScreen() {
             Spacer(modifier = Modifier.height(25.dp))
 
             // LOGIN / REGISTER BUTTON
+
             Button(
                 onClick = {
 
-                    if (email.isBlank() || password.isBlank()) {
+                    if (
+                        email.isBlank() ||
+                        password.isBlank()
+                    ) {
+
                         Toast.makeText(
                             context,
                             "Please enter email and password",
@@ -228,7 +737,11 @@ fun QHubLoginScreen() {
                         return@Button
                     }
 
-                    if (isRegistering && name.isBlank()) {
+                    if (
+                        isRegistering &&
+                        name.isBlank()
+                    ) {
+
                         Toast.makeText(
                             context,
                             "Please enter your name",
@@ -241,6 +754,8 @@ fun QHubLoginScreen() {
                     isLoading = true
 
                     if (isRegistering) {
+
+                        // FIREBASE REGISTRATION
 
                         auth.createUserWithEmailAndPassword(
                             email.trim(),
@@ -266,15 +781,21 @@ fun QHubLoginScreen() {
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
                                     ).edit()
-                                        .putString("role_$uid", selectedRole)
+                                        .putString(
+                                            "role_$uid",
+                                            selectedRole
+                                        )
                                         .apply()
                                 }
 
                                 Toast.makeText(
                                     context,
                                     "Registration successful! Welcome $selectedRole",
-                                    Toast.LENGTH_SHORT
+                                    Toast.LENGTH_LONG
                                 ).show()
+
+                                isRegistering = false
+                                name = ""
 
                             } else {
 
@@ -289,6 +810,8 @@ fun QHubLoginScreen() {
 
                     } else {
 
+                        // FIREBASE EMAIL/PASSWORD LOGIN
+
                         auth.signInWithEmailAndPassword(
                             email.trim(),
                             password
@@ -298,20 +821,44 @@ fun QHubLoginScreen() {
 
                             if (task.isSuccessful) {
 
-                                val uid = auth.currentUser?.uid
+                                val user = auth.currentUser
+
+                                val uid = user?.uid
 
                                 val savedRole = uid?.let {
+
                                     context.getSharedPreferences(
                                         "QHubPrefs",
                                         Context.MODE_PRIVATE
-                                    ).getString("role_$it", selectedRole)
+                                    ).getString(
+                                        "role_$it",
+                                        selectedRole
+                                    )
+
                                 } ?: selectedRole
 
-                                Toast.makeText(
-                                    context,
-                                    "Login successful! Welcome $savedRole",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                if (savedRole == "Teacher") {
+
+                                    teacherName =
+                                        user?.displayName ?: "Teacher"
+
+                                    teacherEmail =
+                                        user?.email ?: email
+
+                                    showTeacherDashboard = true
+
+                                    Toast.makeText(
+                                        context,
+                                        "Welcome $teacherName",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+
+                                } else {
+
+                                    // STUDENT EMAIL/PASSWORD LOGIN
+
+                                    openStudentAccount(user)
+                                }
 
                             } else {
 
@@ -325,13 +872,17 @@ fun QHubLoginScreen() {
                         }
                     }
                 },
+
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
+
                 shape = RoundedCornerShape(15.dp),
+
                 colors = ButtonDefaults.buttonColors(
                     containerColor = DeepBlue
                 ),
+
                 enabled = !isLoading
             ) {
 
@@ -357,9 +908,103 @@ fun QHubLoginScreen() {
                 }
             }
 
+            // ------------------------------------------------
+            // GOOGLE SIGN-IN - STUDENTS ONLY
+            // ------------------------------------------------
+
+            if (
+                selectedRole == "Student" &&
+                !isRegistering
+            ) {
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = Beige
+                    )
+
+                    Text(
+                        text = "  OR  ",
+                        color = BlueGray,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = Beige
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                OutlinedButton(
+                    onClick = {
+
+                        isLoading = true
+
+                        googleSignInLauncher.launch(
+                            googleSignInClient.signInIntent
+                        )
+                    },
+
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+
+                    shape = RoundedCornerShape(15.dp),
+
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = White,
+                        contentColor = DeepBlue
+                    ),
+
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        Beige
+                    ),
+
+                    enabled = !isLoading
+                ) {
+
+                    if (isLoading) {
+
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = DeepBlue,
+                            strokeWidth = 2.dp
+                        )
+
+                    } else {
+
+                        Text(
+                            text = "G",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepBlue
+                        )
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Text(
+                            text = "Continue with Google",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(18.dp))
 
-            // SWITCH BETWEEN LOGIN AND REGISTRATION
+            // LOGIN / REGISTER SWITCH
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -410,7 +1055,7 @@ fun QHubLoginScreen() {
 }
 
 // ----------------------------------------------------
-// QHUB LOGO - CAP DIRECTLY ABOVE Q
+// QHUB LOGO - GRADUATION CAP
 // ----------------------------------------------------
 
 @Composable
@@ -428,8 +1073,6 @@ fun QHubLogo() {
             horizontalArrangement = Arrangement.Center
         ) {
 
-            // Q and cap are in the same Box.
-            // This makes the cap align with Q instead of the whole logo.
             Box(
                 modifier = Modifier.wrapContentSize()
             ) {
@@ -453,7 +1096,6 @@ fun QHubLogo() {
                     val w = size.width
                     val h = size.height
 
-                    // Diamond top of graduation cap
                     val capTop = Path().apply {
                         moveTo(w * 0.02f, h * 0.42f)
                         lineTo(w * 0.52f, h * 0.08f)
@@ -467,7 +1109,6 @@ fun QHubLogo() {
                         color = DeepBlue
                     )
 
-                    // Cap base
                     drawRoundRect(
                         color = DeepBlue,
                         topLeft = Offset(
@@ -481,7 +1122,6 @@ fun QHubLogo() {
                         cornerRadius = CornerRadius(4.dp.toPx())
                     )
 
-                    // Tassel cord
                     drawLine(
                         color = Beige,
                         start = Offset(
@@ -495,7 +1135,6 @@ fun QHubLogo() {
                         strokeWidth = 2.dp.toPx()
                     )
 
-                    // Tassel end
                     drawCircle(
                         color = Beige,
                         radius = 3.dp.toPx(),
@@ -507,7 +1146,6 @@ fun QHubLogo() {
                 }
             }
 
-            // Remaining letters
             Text(
                 text = "Hub",
                 fontSize = 82.sp,
@@ -533,7 +1171,6 @@ fun QHubBackgroundPattern() {
         val w = size.width
         val h = size.height
 
-        // Top-left soft circular pattern
         drawCircle(
             color = LightBeige,
             radius = 100.dp.toPx(),
@@ -552,7 +1189,6 @@ fun QHubBackgroundPattern() {
             )
         )
 
-        // Bottom-right soft pattern
         drawCircle(
             color = LightBeige,
             radius = 115.dp.toPx(),
@@ -571,8 +1207,8 @@ fun QHubBackgroundPattern() {
             )
         )
 
-        // Small decorative dots
         for (i in 0..3) {
+
             for (j in 0..3) {
 
                 drawCircle(
@@ -604,10 +1240,12 @@ fun RoleButton(
         onClick = onClick,
         modifier = modifier.height(50.dp),
         shape = RoundedCornerShape(14.dp),
+
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) DeepBlue else White,
             contentColor = if (selected) White else DeepBlue
         ),
+
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp
         )
@@ -638,14 +1276,18 @@ fun QHubTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.fillMaxWidth(),
+
         label = {
             Text(
                 text = label,
                 color = BlueGray
             )
         },
+
         singleLine = true,
+
         shape = RoundedCornerShape(14.dp),
+
         keyboardOptions = KeyboardOptions(
             keyboardType = if (isPassword) {
                 KeyboardType.Password
@@ -653,11 +1295,13 @@ fun QHubTextField(
                 keyboardType
             }
         ),
+
         visualTransformation = if (isPassword) {
             PasswordVisualTransformation()
         } else {
             VisualTransformation.None
         },
+
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = DeepBlue,
             unfocusedBorderColor = Beige,
