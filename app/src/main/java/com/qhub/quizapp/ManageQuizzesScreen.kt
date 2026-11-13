@@ -9,12 +9,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -33,32 +34,16 @@ private data class ManagedQuizItem(
     val semester: String
 )
 
-private data class ManagedStudent(
-    val id: String,
-    val name: String,
-    val rollNumber: String,
-    val email: String,
-    val studentUid: String
-)
-
-private data class ManagedAttempt(
-    val studentUid: String,
-    val studentEmail: String,
-    val marksObtained: Long,
-    val totalMarks: Long,
-    val correctAnswers: Long,
-    val wrongAnswers: Long,
-    val unanswered: Long
-)
-
 @Composable
 fun ManageQuizzesScreen(
     teacherId: String,
     classId: String,
     className: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onQuizClick: (String) -> Unit = {},
+    onEditQuiz: (String) -> Unit = {}
 ) {
-    val db = FirebaseFirestore.getInstance()
+    val db = remember { FirebaseFirestore.getInstance() }
 
     var quizzes by remember {
         mutableStateOf<List<ManagedQuizItem>>(emptyList())
@@ -66,7 +51,12 @@ fun ManageQuizzesScreen(
 
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var expandedQuizId by remember { mutableStateOf<String?>(null) }
+    var quizToDelete by remember {
+        mutableStateOf<ManagedQuizItem?>(null)
+    }
+    var isDeleting by remember { mutableStateOf(false) }
+    var actionMessage by remember { mutableStateOf("") }
+    var isActionError by remember { mutableStateOf(false) }
 
     DisposableEffect(teacherId, classId) {
         var registration: ListenerRegistration? = null
@@ -84,10 +74,9 @@ fun ManageQuizzesScreen(
 
                     if (error != null) {
                         isLoading = false
-                        errorMessage = error.localizedMessage
-                            ?: "Could not load quizzes."
+                        errorMessage =
+                            error.localizedMessage ?: "Could not load quizzes."
                     } else if (snapshot != null) {
-
                         quizzes = snapshot.documents.map { document ->
                             ManagedQuizItem(
                                 id = document.id,
@@ -123,6 +112,69 @@ fun ManageQuizzesScreen(
         }
     }
 
+    fun deleteQuiz(quiz: ManagedQuizItem) {
+        isDeleting = true
+        actionMessage = ""
+
+        val quizRef = db.collection("teachers")
+            .document(teacherId)
+            .collection("classes")
+            .document(classId)
+            .collection("quizzes")
+            .document(quiz.id)
+
+        quizRef.collection("attempts")
+            .get()
+            .addOnSuccessListener { attemptsSnapshot ->
+
+                quizRef.collection("answerKeys")
+                    .get()
+                    .addOnSuccessListener { answerKeysSnapshot ->
+
+                        val batch = db.batch()
+
+                        attemptsSnapshot.documents.forEach { document ->
+                            batch.delete(document.reference)
+                        }
+
+                        answerKeysSnapshot.documents.forEach { document ->
+                            batch.delete(document.reference)
+                        }
+
+                        batch.delete(quizRef)
+
+                        batch.commit()
+                            .addOnSuccessListener {
+                                isDeleting = false
+                                quizToDelete = null
+                                actionMessage = "Quiz deleted successfully."
+                                isActionError = false
+                            }
+                            .addOnFailureListener { exception ->
+                                isDeleting = false
+                                actionMessage =
+                                    exception.localizedMessage
+                                        ?: "Could not delete quiz."
+                                isActionError = true
+                            }
+                    }
+                    .addOnFailureListener { exception ->
+                        isDeleting = false
+                        actionMessage =
+                            exception.localizedMessage
+                                ?: "Could not delete quiz answer keys."
+                        isActionError = true
+                    }
+            }
+            .addOnFailureListener { exception ->
+                isDeleting = false
+                actionMessage =
+                    exception.localizedMessage
+                        ?: "Could not delete quiz attempts."
+                isActionError = true
+            }
+    }
+
     val colors = MaterialTheme.colorScheme
 
     Column(
@@ -155,7 +207,21 @@ fun ManageQuizzesScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
+
+        if (actionMessage.isNotEmpty()) {
+            Text(
+                text = actionMessage,
+                color = if (isActionError) {
+                    colors.error
+                } else {
+                    Color(0xFF218838)
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            Spacer(Modifier.height(10.dp))
+        }
 
         when {
             isLoading -> {
@@ -224,8 +290,6 @@ fun ManageQuizzesScreen(
                         key = { it.id }
                     ) { quiz ->
 
-                        val isExpanded = expandedQuizId == quiz.id
-
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
@@ -234,13 +298,49 @@ fun ManageQuizzesScreen(
                             Column(
                                 modifier = Modifier.padding(18.dp)
                             ) {
-                                Text(
-                                    quiz.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        quiz.title,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                onQuizClick(quiz.id)
+                                            },
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
 
-                                Spacer(Modifier.height(10.dp))
+                                    IconButton(
+                                        onClick = {
+                                            onEditQuiz(quiz.id)
+                                        },
+                                        enabled = !isDeleting
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Quiz",
+                                            tint = colors.primary
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            quizToDelete = quiz
+                                        },
+                                        enabled = !isDeleting
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Quiz",
+                                            tint = Color(0xFFD32F2F)
+                                        )
+                                    }
+                                }
+
+                                Spacer(Modifier.height(8.dp))
 
                                 Text("Subject: ${quiz.subjectName}")
                                 Text("Semester: ${quiz.semester}")
@@ -267,47 +367,13 @@ fun ManageQuizzesScreen(
                                     )
                                 }
 
-                                Spacer(Modifier.height(14.dp))
+                                Spacer(Modifier.height(8.dp))
 
-                                HorizontalDivider()
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            expandedQuizId =
-                                                if (isExpanded) null else quiz.id
-                                        }
-                                        .padding(vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement =
-                                        Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        "View Student Results",
-                                        color = colors.primary,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-
-                                    Icon(
-                                        imageVector = if (isExpanded)
-                                            Icons.Default.ExpandLess
-                                        else
-                                            Icons.Default.ExpandMore,
-                                        contentDescription = null,
-                                        tint = colors.primary
-                                    )
-                                }
-
-                                if (isExpanded) {
-                                    HorizontalDivider()
-
-                                    QuizStudentResults(
-                                        teacherId = teacherId,
-                                        classId = classId,
-                                        quiz = quiz
-                                    )
-                                }
+                                Text(
+                                    "Tap quiz title to view student results",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.primary
+                                )
                             }
                         }
                     }
@@ -315,314 +381,57 @@ fun ManageQuizzesScreen(
             }
         }
     }
-}
 
-@Composable
-private fun QuizStudentResults(
-    teacherId: String,
-    classId: String,
-    quiz: ManagedQuizItem
-) {
-    val db = FirebaseFirestore.getInstance()
-    val colors = MaterialTheme.colorScheme
-
-    var students by remember(quiz.id) {
-        mutableStateOf<List<ManagedStudent>>(emptyList())
-    }
-
-    var attempts by remember(quiz.id) {
-        mutableStateOf<List<ManagedAttempt>>(emptyList())
-    }
-
-    var isLoading by remember(quiz.id) {
-        mutableStateOf(true)
-    }
-
-    var errorMessage by remember(quiz.id) {
-        mutableStateOf<String?>(null)
-    }
-
-    var expandedStudentId by remember(quiz.id) {
-        mutableStateOf<String?>(null)
-    }
-
-    DisposableEffect(teacherId, classId, quiz.id) {
-        var rosterRegistration: ListenerRegistration? = null
-        var attemptsRegistration: ListenerRegistration? = null
-
-        val rosterQuery = db.collection("studentRoster")
-            .whereEqualTo("teacherId", teacherId)
-            .whereEqualTo("classId", classId)
-
-        rosterRegistration = rosterQuery.addSnapshotListener { snapshot, error ->
-
-            if (error != null) {
-                errorMessage = error.localizedMessage
-                    ?: "Could not load students."
-                isLoading = false
-            } else if (snapshot != null) {
-
-                students = snapshot.documents
-                    .filter { document ->
-                        val subjectMatches =
-                            document.getString("subjectName")
-                                ?.equals(quiz.subjectName, ignoreCase = true)
-                                ?: false
-
-                        val semesterMatches =
-                            quiz.semester.isBlank() ||
-                                    document.getString("semester")
-                                        ?.equals(quiz.semester, ignoreCase = true)
-                                    ?: false
-
-                        subjectMatches && semesterMatches
-                    }
-                    .map { document ->
-                        ManagedStudent(
-                            id = document.id,
-                            name = document.getString("name")
-                                ?: "Unknown Student",
-                            rollNumber = document.getString("rollNumber")
-                                ?: "",
-                            email = document.getString("email")
-                                ?: "",
-                            studentUid = document.getString("studentUid")
-                                ?: ""
-                        )
-                    }
-                    .distinctBy { it.id }
-
-                isLoading = false
-                errorMessage = null
-            }
-        }
-
-        attemptsRegistration = db.collection("teachers")
-            .document(teacherId)
-            .collection("classes")
-            .document(classId)
-            .collection("quizzes")
-            .document(quiz.id)
-            .collection("attempts")
-            .addSnapshotListener { snapshot, error ->
-
-                if (error != null) {
-                    errorMessage = error.localizedMessage
-                        ?: "Could not load student marks."
-                } else if (snapshot != null) {
-
-                    attempts = snapshot.documents.map { document ->
-                        ManagedAttempt(
-                            studentUid = document.getString("studentUid")
-                                ?: document.id,
-                            studentEmail = document.getString("studentEmail")
-                                ?: "",
-                            marksObtained =
-                                document.getLong("marksObtained") ?: 0L,
-                            totalMarks =
-                                document.getLong("totalMarks") ?: quiz.totalMarks,
-                            correctAnswers =
-                                document.getLong("correctAnswers") ?: 0L,
-                            wrongAnswers =
-                                document.getLong("wrongAnswers") ?: 0L,
-                            unanswered =
-                                document.getLong("unanswered") ?: 0L
-                        )
-                    }
+    quizToDelete?.let { quiz ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!isDeleting) {
+                    quizToDelete = null
                 }
-            }
-
-        onDispose {
-            rosterRegistration?.remove()
-            attemptsRegistration?.remove()
-        }
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    when {
-        isLoading -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp)
+            },
+            title = {
+                Text(
+                    "Delete Quiz?",
+                    fontWeight = FontWeight.Bold
                 )
-            }
-        }
-
-        errorMessage != null -> {
-            Text(
-                errorMessage!!,
-                color = colors.error,
-                modifier = Modifier.padding(vertical = 12.dp)
-            )
-        }
-
-        students.isEmpty() -> {
-            Text(
-                "No students found for this subject and semester.",
-                modifier = Modifier.padding(vertical = 12.dp),
-                color = colors.onSurfaceVariant
-            )
-        }
-
-        else -> {
-            val attemptedCount = students.count { student ->
-                attempts.any { attempt ->
-                    (
-                            student.studentUid.isNotBlank() &&
-                                    attempt.studentUid == student.studentUid
-                            ) || (
-                            student.email.isNotBlank() &&
-                                    attempt.studentEmail.equals(
-                                        student.email,
-                                        ignoreCase = true
-                                    )
-                            )
-                }
-            }
-
-            Text(
-                "Student Performance",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(vertical = 12.dp)
-            )
-
-            Text(
-                "Attempted: $attemptedCount / ${students.size}",
-                color = colors.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            students.forEach { student ->
-
-                val attempt = attempts.firstOrNull { result ->
-                    (
-                            student.studentUid.isNotBlank() &&
-                                    result.studentUid == student.studentUid
-                            ) || (
-                            student.email.isNotBlank() &&
-                                    result.studentEmail.equals(
-                                        student.email,
-                                        ignoreCase = true
-                                    )
-                            )
-                }
-
-                val isStudentExpanded =
-                    expandedStudentId == student.id
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 5.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = colors.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(10.dp)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete \"${quiz.title}\"? " +
+                            "Its saved attempts and answer key will also be deleted. " +
+                            "This action cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteQuiz(quiz)
+                    },
+                    enabled = !isDeleting
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (attempt != null) {
-                                    expandedStudentId =
-                                        if (isStudentExpanded) null
-                                        else student.id
-                                }
-                            }
-                            .padding(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    student.name,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-
-                                Text(
-                                    "Roll No: ${student.rollNumber}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant
-                                )
-                            }
-
-                            Column(
-                                horizontalAlignment = Alignment.End
-                            ) {
-                                if (attempt != null) {
-                                    Text(
-                                        "${attempt.marksObtained}/${attempt.totalMarks}",
-                                        color = colors.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    Text(
-                                        "Attempted",
-                                        color = colors.primary,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                } else {
-                                    Text(
-                                        "Not Attempted",
-                                        color = colors.error,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                            }
-                        }
-
-                        if (attempt != null && isStudentExpanded) {
-                            Spacer(Modifier.height(12.dp))
-                            HorizontalDivider()
-                            Spacer(Modifier.height(10.dp))
-
-                            Text(
-                                "Individual Result",
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Spacer(Modifier.height(8.dp))
-
-                            Text(
-                                "Marks Obtained: ${attempt.marksObtained}/${attempt.totalMarks}"
-                            )
-
-                            Text(
-                                "Correct Answers: ${attempt.correctAnswers}"
-                            )
-
-                            Text(
-                                "Wrong Answers: ${attempt.wrongAnswers}"
-                            )
-
-                            Text(
-                                "Unanswered: ${attempt.unanswered}"
-                            )
-                        }
-
-                        if (attempt != null && !isStudentExpanded) {
-                            Text(
-                                "Tap to view result details",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant
-                            )
-                        }
+                    if (isDeleting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            "Delete",
+                            color = Color(0xFFD32F2F)
+                        )
                     }
                 }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        quizToDelete = null
+                    },
+                    enabled = !isDeleting
+                ) {
+                    Text("Cancel")
+                }
             }
-        }
+        )
     }
 }

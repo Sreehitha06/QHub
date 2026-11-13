@@ -1,4 +1,3 @@
-
 package com.qhub.quizapp
 
 import android.content.Context
@@ -27,8 +26,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,7 +67,11 @@ fun TeacherDashboard(
     var showCsvUpload by remember { mutableStateOf(false) }
     var showCreateQuiz by remember { mutableStateOf(false) }
 
+    // QUIZ NAVIGATION
     var showManageQuizzes by remember { mutableStateOf(false) }
+    var showQuizResults by remember { mutableStateOf(false) }
+    var showEditQuiz by remember { mutableStateOf(false) }
+    var selectedQuizId by remember { mutableStateOf("") }
 
     var teacherName by remember {
         mutableStateOf(user?.displayName ?: "Teacher")
@@ -82,6 +87,9 @@ fun TeacherDashboard(
     var editDesignation by remember { mutableStateOf("") }
     var isEditing by remember { mutableStateOf(false) }
 
+    var isProfileSaving by remember { mutableStateOf(false) }
+    var profileMessage by remember { mutableStateOf<String?>(null) }
+
     var classes by remember {
         mutableStateOf(listOf<QHubTeacherClass>())
     }
@@ -90,7 +98,7 @@ fun TeacherDashboard(
         mutableStateOf(setOf<String>())
     }
 
-    // NEW: Subject and semester contexts grouped by class.
+    // SUBJECT AND SEMESTER CONTEXTS GROUPED BY CLASS
     var rosterContextsByClass by remember {
         mutableStateOf<Map<String, List<QHubRosterContext>>>(emptyMap())
     }
@@ -118,16 +126,22 @@ fun TeacherDashboard(
         var rosterRegistration: ListenerRegistration? = null
 
         if (uid != null) {
+
             classRegistration = db.collection("teachers")
                 .document(uid)
                 .collection("classes")
                 .addSnapshotListener { snapshot, error ->
+
                     if (error != null) {
                         errorMessage = error.localizedMessage
                             ?: "Could not load classes"
+
                     } else if (snapshot != null) {
+
                         classes = snapshot.documents.mapNotNull { document ->
+
                             val name = document.getString("className")
+
                             if (name != null) {
                                 QHubTeacherClass(document.id, name)
                             } else {
@@ -140,9 +154,11 @@ fun TeacherDashboard(
             rosterRegistration = db.collection("studentRoster")
                 .whereEqualTo("teacherId", uid)
                 .addSnapshotListener { snapshot, error ->
+
                     if (error != null) {
                         errorMessage = error.localizedMessage
                             ?: "Could not check uploaded CSV files"
+
                     } else if (snapshot != null) {
 
                         val rosterDocuments = snapshot.documents
@@ -160,6 +176,7 @@ fun TeacherDashboard(
                             .mapValues { (_, documents) ->
 
                                 documents.mapNotNull { document ->
+
                                     val subject = document
                                         .getString("subjectName")
                                         ?.trim()
@@ -181,12 +198,14 @@ fun TeacherDashboard(
                                     } else {
                                         null
                                     }
+
                                 }.distinctBy {
                                     "${it.subjectName.lowercase()}|${it.semester.lowercase()}"
                                 }
                             }
                     }
                 }
+
         } else {
             errorMessage = "Please log in again."
         }
@@ -197,11 +216,48 @@ fun TeacherDashboard(
         }
     }
 
+    // LOAD TEACHER PROFILE FROM FIRESTORE
+    DisposableEffect(uid) {
+        var profileRegistration: ListenerRegistration? = null
+
+        if (uid != null) {
+
+            profileRegistration = db.collection("teachers")
+                .document(uid)
+                .addSnapshotListener { snapshot, error ->
+
+                    if (error != null) {
+
+                        profileMessage = error.localizedMessage
+                            ?: "Could not load teacher profile."
+
+                    } else if (snapshot != null && snapshot.exists()) {
+
+                        teacherName = snapshot.getString("name")
+                            ?: user?.displayName
+                                    ?: "Teacher"
+
+                        department = snapshot.getString("department")
+                            ?: "Department Name"
+
+                        designation = snapshot.getString("designation")
+                            ?: "Faculty"
+                    }
+                }
+        }
+
+        onDispose {
+            profileRegistration?.remove()
+        }
+    }
+
     // CSV PICKER
     val csvPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
+
         if (uri != null) {
+
             if (uid == null) {
                 uploadMessage = "Please log in again."
                 return@rememberLauncherForActivityResult
@@ -218,10 +274,12 @@ fun TeacherDashboard(
             }
 
             scope.launch {
+
                 isSaving = true
                 uploadMessage = "Reading CSV file..."
 
                 try {
+
                     val students = withContext(Dispatchers.IO) {
                         readQHubCsv(context, uri)
                     }
@@ -241,6 +299,7 @@ fun TeacherDashboard(
                     val email = teacherEmail
 
                     val documents = students.map { student ->
+
                         val key = listOf(
                             teacherId,
                             normalizedClassId,
@@ -270,10 +329,13 @@ fun TeacherDashboard(
                     }
 
                     withContext(Dispatchers.IO) {
+
                         documents.chunked(450).forEach { chunk ->
+
                             val batch = db.batch()
 
                             chunk.forEach { (documentId, data) ->
+
                                 val ref = db.collection("studentRoster")
                                     .document(documentId)
 
@@ -288,8 +350,10 @@ fun TeacherDashboard(
                         "Successfully uploaded ${students.size} students!"
 
                 } catch (e: Exception) {
+
                     uploadMessage = e.localizedMessage
                         ?: "CSV upload failed."
+
                 } finally {
                     isSaving = false
                 }
@@ -312,6 +376,7 @@ fun TeacherDashboard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+
             Text(
                 "QHub",
                 style = MaterialTheme.typography.headlineSmall,
@@ -322,6 +387,7 @@ fun TeacherDashboard(
             IconButton(
                 onClick = {
                     isEditing = false
+                    profileMessage = null
                     showProfile = true
                 }
             ) {
@@ -336,6 +402,7 @@ fun TeacherDashboard(
 
         // DASHBOARD OR SELECTED CLASS
         if (selectedTeacherClass == null) {
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -343,6 +410,7 @@ fun TeacherDashboard(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+
                 Text(
                     "QHub",
                     style = MaterialTheme.typography.displayMedium,
@@ -373,10 +441,12 @@ fun TeacherDashboard(
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
+
                     Column(
                         modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+
                         Icon(
                             Icons.Default.Add,
                             contentDescription = null,
@@ -424,10 +494,12 @@ fun TeacherDashboard(
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(2.dp)
                 ) {
+
                     Column(
                         modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+
                         Icon(
                             Icons.Default.UploadFile,
                             contentDescription = null,
@@ -492,6 +564,7 @@ fun TeacherDashboard(
                 Spacer(Modifier.height(12.dp))
 
                 if (classes.isEmpty()) {
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -504,8 +577,11 @@ fun TeacherDashboard(
                             color = colors.onSurfaceVariant
                         )
                     }
+
                 } else {
+
                     classes.forEachIndexed { index, teacherClass ->
+
                         val hasRoster = teacherClass.id in classesWithRoster
 
                         Card(
@@ -524,12 +600,14 @@ fun TeacherDashboard(
                             ),
                             elevation = CardDefaults.cardElevation(2.dp)
                         ) {
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(18.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+
                                 Icon(
                                     Icons.Default.AccountCircle,
                                     contentDescription = null,
@@ -545,6 +623,7 @@ fun TeacherDashboard(
                                 Column(
                                     modifier = Modifier.weight(1f)
                                 ) {
+
                                     Text(
                                         teacherClass.name,
                                         style = MaterialTheme.typography.titleMedium,
@@ -595,20 +674,28 @@ fun TeacherDashboard(
 
             when {
 
-                // MANAGE QUIZZES SCREEN
-                showManageQuizzes -> {
+                // QUIZ RESULTS SCREEN
+                showQuizResults -> {
+
                     val currentTeacherId = uid
 
-                    if (currentTeacherId != null) {
-                        ManageQuizzesScreen(
+                    if (
+                        currentTeacherId != null &&
+                        selectedQuizId.isNotBlank()
+                    ) {
+
+                        TeacherQuizResultsScreen(
                             teacherId = currentTeacherId,
                             classId = currentClass.id,
-                            className = currentClass.name,
+                            quizId = selectedQuizId,
                             onBack = {
-                                showManageQuizzes = false
+                                showQuizResults = false
+                                showManageQuizzes = true
                             }
                         )
+
                     } else {
+
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -616,6 +703,117 @@ fun TeacherDashboard(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
+
+                            Text(
+                                "Unable to open quiz results. Please log in again.",
+                                color = colors.error
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    showQuizResults = false
+                                    showManageQuizzes = true
+                                }
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+
+                // EDIT QUIZ SCREEN
+                showEditQuiz -> {
+
+                    val currentTeacherId = uid
+
+                    if (
+                        currentTeacherId != null &&
+                        selectedQuizId.isNotBlank()
+                    ) {
+
+                        EditQuizScreen(
+                            teacherId = currentTeacherId,
+                            classId = currentClass.id,
+                            className = currentClass.name,
+                            quizId = selectedQuizId,
+                            onBack = {
+                                showEditQuiz = false
+                                showManageQuizzes = true
+                            }
+                        )
+
+                    } else {
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+
+                            Text(
+                                "Unable to edit this quiz. Please log in again.",
+                                color = colors.error
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    showEditQuiz = false
+                                    showManageQuizzes = true
+                                }
+                            ) {
+                                Text("Back")
+                            }
+                        }
+                    }
+                }
+
+                // MANAGE QUIZZES SCREEN
+                showManageQuizzes -> {
+
+                    val currentTeacherId = uid
+
+                    if (currentTeacherId != null) {
+
+                        ManageQuizzesScreen(
+                            teacherId = currentTeacherId,
+                            classId = currentClass.id,
+                            className = currentClass.name,
+
+                            onBack = {
+                                showManageQuizzes = false
+                                showEditQuiz = false
+                                showQuizResults = false
+                            },
+
+                            onQuizClick = { quizId ->
+                                selectedQuizId = quizId
+                                showQuizResults = true
+                                showEditQuiz = false
+                            },
+
+                            onEditQuiz = { quizId ->
+                                selectedQuizId = quizId
+                                showEditQuiz = true
+                                showQuizResults = false
+                            }
+                        )
+
+                    } else {
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+
                             Text(
                                 "Please log in again.",
                                 color = colors.error
@@ -634,6 +832,7 @@ fun TeacherDashboard(
 
                 // CREATE QUIZ SCREEN
                 showCreateQuiz -> {
+
                     CreateQuizScreen(
                         className = currentClass.name,
 
@@ -660,8 +859,11 @@ fun TeacherDashboard(
                                 .currentUser?.uid
 
                             if (teacherId == null) {
+
                                 onResult(false, "Please log in again.")
+
                             } else {
+
                                 TeacherQuizRepository.saveQuiz(
                                     teacherId = teacherId,
                                     classId = currentClass.id,
@@ -691,6 +893,7 @@ fun TeacherDashboard(
 
                 // CLASS HOME SCREEN
                 else -> {
+
                     TeacherClassHomeScreen(
                         teacherClass = currentClass,
 
@@ -698,16 +901,23 @@ fun TeacherDashboard(
                             selectedTeacherClass = null
                             showCreateQuiz = false
                             showManageQuizzes = false
+                            showQuizResults = false
+                            showEditQuiz = false
+                            selectedQuizId = ""
                         },
 
                         onCreateQuiz = {
                             showCreateQuiz = true
                             showManageQuizzes = false
+                            showQuizResults = false
+                            showEditQuiz = false
                         },
 
                         onManageQuizzes = {
                             showManageQuizzes = true
                             showCreateQuiz = false
+                            showQuizResults = false
+                            showEditQuiz = false
                         }
                     )
                 }
@@ -717,15 +927,19 @@ fun TeacherDashboard(
 
     // CREATE CLASS DIALOG
     if (showCreateClass) {
+
         AlertDialog(
             onDismissRequest = {
                 if (!isSaving) showCreateClass = false
             },
+
             title = {
                 Text("Create New Class", fontWeight = FontWeight.Bold)
             },
+
             text = {
                 Column {
+
                     Text("Enter your class name.")
 
                     Spacer(Modifier.height(16.dp))
@@ -745,11 +959,15 @@ fun TeacherDashboard(
                     }
                 }
             },
+
             confirmButton = {
+
                 TextButton(
                     enabled = newClassName.isNotBlank() &&
                             !isSaving && uid != null,
+
                     onClick = {
+
                         val className = newClassName.trim()
 
                         if (uid == null) {
@@ -783,6 +1001,7 @@ fun TeacherDashboard(
                             }
                     }
                 ) {
+
                     if (isSaving) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
@@ -793,7 +1012,9 @@ fun TeacherDashboard(
                     }
                 }
             },
+
             dismissButton = {
+
                 TextButton(
                     enabled = !isSaving,
                     onClick = {
@@ -810,13 +1031,16 @@ fun TeacherDashboard(
 
     // CSV UPLOAD DIALOG
     if (showCsvUpload) {
+
         AlertDialog(
             onDismissRequest = {
                 if (!isSaving) showCsvUpload = false
             },
+
             title = {
                 Text("Upload Student CSV", fontWeight = FontWeight.Bold)
             },
+
             text = {
                 Column(
                     modifier = Modifier
@@ -825,11 +1049,13 @@ fun TeacherDashboard(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+
                     Text("Choose the class for this roster.")
 
                     var expanded by remember { mutableStateOf(false) }
 
                     Box {
+
                         OutlinedButton(
                             onClick = { expanded = true },
                             modifier = Modifier.fillMaxWidth()
@@ -846,7 +1072,9 @@ fun TeacherDashboard(
                             expanded = expanded,
                             onDismissRequest = { expanded = false }
                         ) {
+
                             classes.forEach { teacherClass ->
+
                                 DropdownMenuItem(
                                     text = { Text(teacherClass.name) },
                                     onClick = {
@@ -894,16 +1122,20 @@ fun TeacherDashboard(
                     }
                 }
             },
+
             confirmButton = {
+
                 TextButton(
                     enabled = !isSaving &&
                             selectedClassId.isNotBlank() &&
                             subjectName.isNotBlank() &&
                             semester.isNotBlank(),
+
                     onClick = {
                         csvPicker.launch(arrayOf("*/*"))
                     }
                 ) {
+
                     if (isSaving) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
@@ -914,7 +1146,9 @@ fun TeacherDashboard(
                     }
                 }
             },
+
             dismissButton = {
+
                 TextButton(
                     enabled = !isSaving,
                     onClick = {
@@ -930,17 +1164,23 @@ fun TeacherDashboard(
 
     // TEACHER PROFILE
     if (showProfile) {
+
         AlertDialog(
             onDismissRequest = {
-                showProfile = false
-                isEditing = false
+                if (!isProfileSaving) {
+                    showProfile = false
+                    isEditing = false
+                    profileMessage = null
+                }
             },
+
             title = {
                 Text(
                     if (isEditing) "Edit Profile" else "Teacher Profile",
                     fontWeight = FontWeight.Bold
                 )
             },
+
             text = {
                 Column(
                     modifier = Modifier
@@ -948,6 +1188,7 @@ fun TeacherDashboard(
                         .heightIn(max = 450.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+
                     Icon(
                         Icons.Default.AccountCircle,
                         contentDescription = null,
@@ -958,6 +1199,7 @@ fun TeacherDashboard(
                     )
 
                     if (isEditing) {
+
                         OutlinedTextField(
                             value = editName,
                             onValueChange = { editName = it },
@@ -990,43 +1232,122 @@ fun TeacherDashboard(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
+
                     } else {
+
                         QHubTeacherProfileDetailRow("Teacher Name", teacherName)
                         QHubTeacherProfileDetailRow("Email ID", teacherEmail)
                         QHubTeacherProfileDetailRow("Department", department)
                         QHubTeacherProfileDetailRow("Designation", designation)
                     }
+
+                    profileMessage?.let { message ->
+
+                        Text(
+                            text = message,
+                            color = if (
+                                message == "Profile saved successfully."
+                            ) {
+                                colors.primary
+                            } else {
+                                colors.error
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             },
+
             confirmButton = {
+
                 if (isEditing) {
+
                     TextButton(
+                        enabled = !isProfileSaving,
+
                         onClick = {
-                            if (editName.isNotBlank()) {
-                                teacherName = editName.trim()
 
-                                val updates =
-                                    com.google.firebase.auth
-                                        .UserProfileChangeRequest.Builder()
-                                        .setDisplayName(teacherName)
-                                        .build()
+                            val currentUid = uid
 
-                                auth.currentUser?.updateProfile(updates)
+                            if (currentUid == null) {
+                                profileMessage = "Please log in again."
+                                return@TextButton
                             }
 
-                            department = editDepartment.trim()
-                            designation = editDesignation.trim()
-                            isEditing = false
+                            if (editName.isBlank()) {
+                                profileMessage =
+                                    "Teacher name cannot be empty."
+                                return@TextButton
+                            }
+
+                            isProfileSaving = true
+                            profileMessage = null
+
+                            val updatedName = editName.trim()
+                            val updatedDepartment = editDepartment.trim()
+                            val updatedDesignation = editDesignation.trim()
+
+                            val profileData = hashMapOf(
+                                "name" to updatedName,
+                                "email" to teacherEmail,
+                                "department" to updatedDepartment,
+                                "designation" to updatedDesignation,
+                                "updatedAt" to System.currentTimeMillis()
+                            )
+
+                            db.collection("teachers")
+                                .document(currentUid)
+                                .set(
+                                    profileData,
+                                    SetOptions.merge()
+                                )
+                                .addOnSuccessListener {
+
+                                    teacherName = updatedName
+                                    department = updatedDepartment
+                                    designation = updatedDesignation
+
+                                    val updates =
+                                        UserProfileChangeRequest.Builder()
+                                            .setDisplayName(updatedName)
+                                            .build()
+
+                                    auth.currentUser?.updateProfile(updates)
+
+                                    isProfileSaving = false
+                                    isEditing = false
+                                    profileMessage =
+                                        "Profile saved successfully."
+                                }
+                                .addOnFailureListener { exception ->
+
+                                    isProfileSaving = false
+
+                                    profileMessage =
+                                        exception.localizedMessage
+                                            ?: "Could not save profile."
+                                }
                         }
                     ) {
-                        Text("Save Changes")
+
+                        if (isProfileSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Save Changes")
+                        }
                     }
+
                 } else {
+
                     TextButton(
                         onClick = {
                             editName = teacherName
                             editDepartment = department
                             editDesignation = designation
+                            profileMessage = null
                             isEditing = true
                         }
                     ) {
@@ -1034,20 +1355,38 @@ fun TeacherDashboard(
                     }
                 }
             },
+
             dismissButton = {
+
                 if (isEditing) {
-                    TextButton(onClick = { isEditing = false }) {
+
+                    TextButton(
+                        enabled = !isProfileSaving,
+                        onClick = {
+                            isEditing = false
+                            profileMessage = null
+                        }
+                    ) {
                         Text("Cancel")
                     }
+
                 } else {
+
                     Row {
-                        TextButton(onClick = { showProfile = false }) {
+
+                        TextButton(
+                            onClick = {
+                                showProfile = false
+                                profileMessage = null
+                            }
+                        ) {
                             Text("Close")
                         }
 
                         TextButton(
                             onClick = {
                                 showProfile = false
+                                profileMessage = null
                                 onLogout()
                             }
                         ) {
@@ -1076,6 +1415,7 @@ private fun TeacherClassHomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(24.dp)
     ) {
+
         TextButton(onClick = onBack) {
             Icon(Icons.Default.ArrowBack, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -1108,12 +1448,15 @@ private fun TeacherClassHomeScreen(
 
         Spacer(Modifier.height(32.dp))
 
+        // CREATE QUIZ CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
             elevation = CardDefaults.cardElevation(3.dp)
         ) {
+
             Column(modifier = Modifier.padding(22.dp)) {
+
                 Icon(
                     Icons.Default.Quiz,
                     contentDescription = null,
@@ -1152,12 +1495,15 @@ private fun TeacherClassHomeScreen(
 
         Spacer(Modifier.height(20.dp))
 
+        // MANAGE QUIZZES CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
             elevation = CardDefaults.cardElevation(3.dp)
         ) {
+
             Column(modifier = Modifier.padding(22.dp)) {
+
                 Icon(
                     Icons.Default.Assessment,
                     contentDescription = null,
@@ -1209,6 +1555,7 @@ private fun readQHubCsv(
     context: Context,
     uri: Uri
 ): List<QHubCsvStudent> {
+
     val text = context.contentResolver.openInputStream(uri)
         ?.bufferedReader(Charsets.UTF_8)
         ?.use { it.readText() }
@@ -1252,6 +1599,7 @@ private fun readQHubCsv(
     val seenEmails = mutableSetOf<String>()
 
     rows.drop(1).forEachIndexed { index, row ->
+
         if (row.all { it.isBlank() }) return@forEachIndexed
 
         val requiredIndex = listOf(
@@ -1306,6 +1654,7 @@ private fun readQHubCsv(
 
 // CSV PARSER
 private fun parseQHubCsv(text: String): List<List<String>> {
+
     val rows = mutableListOf<List<String>>()
     val row = mutableListOf<String>()
     val field = StringBuilder()
@@ -1314,13 +1663,16 @@ private fun parseQHubCsv(text: String): List<List<String>> {
     var index = 0
 
     while (index < text.length) {
+
         val char = text[index]
 
         when {
+
             char == '"' &&
                     insideQuotes &&
                     index + 1 < text.length &&
                     text[index + 1] == '"' -> {
+
                 field.append('"')
                 index++
             }
@@ -1335,6 +1687,7 @@ private fun parseQHubCsv(text: String): List<List<String>> {
             }
 
             (char == '\n' || char == '\r') && !insideQuotes -> {
+
                 row.add(field.toString())
                 field.clear()
 
@@ -1373,6 +1726,7 @@ private fun parseQHubCsv(text: String): List<List<String>> {
 
 // SHA-256
 private fun sha256(value: String): String {
+
     val bytes = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
 
@@ -1384,6 +1738,7 @@ private fun sha256(value: String): String {
 // FIREBASE TASK AWAIT
 private suspend fun <T> Task<T>.awaitResult(): T =
     suspendCoroutine { continuation ->
+
         addOnSuccessListener { result ->
             continuation.resume(result)
         }
@@ -1408,6 +1763,7 @@ fun QHubTeacherProfileDetailRow(
     Column(
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
+
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
