@@ -15,7 +15,6 @@ data class StudentDetails(
     val subjects: List<String> = emptyList()
 )
 
-// One enrollment represents one teacher's subject/class assignment.
 data class StudentEnrollment(
     val rosterId: String = "",
     val name: String = "",
@@ -36,8 +35,42 @@ class StudentRepository {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    // Fetch all subjects assigned to the currently logged-in student.
-    // Firebase email verification is NOT required.
+    // Link the logged-in Firebase UID to every matching roster entry.
+    private fun linkStudentToRoster(
+        documents: List<com.google.firebase.firestore.DocumentSnapshot>,
+        uid: String,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val batch = db.batch()
+
+        for (document in documents) {
+            val existingUid = document.getString("studentUid")
+
+            if (!existingUid.isNullOrBlank() && existingUid != uid) {
+                onFailure(
+                    "A roster entry is already linked to another student account. Please contact your teacher."
+                )
+                return
+            }
+
+            if (existingUid.isNullOrBlank()) {
+                batch.update(document.reference, "studentUid", uid)
+            }
+        }
+
+        batch.commit()
+            .addOnSuccessListener {
+                onSuccess()
+            }
+            .addOnFailureListener { exception ->
+                onFailure(
+                    exception.localizedMessage
+                        ?: "Unable to link your account to the student roster."
+                )
+            }
+    }
+
     fun getVerifiedStudentEnrollments(
         onSuccess: (List<StudentEnrollment>) -> Unit,
         onFailure: (String) -> Unit
@@ -49,6 +82,7 @@ class StudentRepository {
             return
         }
 
+        val uid = currentUser.uid
         val studentEmail = currentUser.email
             ?.trim()
             ?.lowercase()
@@ -64,70 +98,77 @@ class StudentRepository {
             .get()
             .addOnSuccessListener { documents ->
 
-                val enrollments = documents.mapNotNull { document ->
+                if (documents.isEmpty) {
+                    onSuccess(emptyList())
+                    return@addOnSuccessListener
+                }
 
-                    val subjectName =
-                        document.getString("subjectName")
-                            ?.trim()
-                            .orEmpty()
+                linkStudentToRoster(
+                    documents = documents.documents,
+                    uid = uid,
+                    onSuccess = {
 
-                    val teacherId =
-                        document.getString("teacherId")
-                            ?.trim()
-                            .orEmpty()
+                        val enrollments = documents.mapNotNull { document ->
 
-                    val classId =
-                        document.getString("classId")
-                            ?.trim()
-                            .orEmpty()
+                            val subjectName =
+                                document.getString("subjectName")
+                                    ?.trim()
+                                    .orEmpty()
 
-                    // Ignore incomplete roster records.
-                    if (
-                        subjectName.isBlank() ||
-                        teacherId.isBlank() ||
-                        classId.isBlank()
-                    ) {
-                        return@mapNotNull null
-                    }
+                            val teacherId =
+                                document.getString("teacherId")
+                                    ?.trim()
+                                    .orEmpty()
 
-                    StudentEnrollment(
-                        rosterId = document.id,
-                        name = document.getString("name") ?: "",
-                        email = document.getString("email") ?: "",
-                        rollNumber = document.getString("rollNumber") ?: "",
-                        department = document.getString("department") ?: "",
-                        section = document.getString("section") ?: "",
-                        subjectName = subjectName,
-                        semester = document.getString("semester") ?: "",
-                        classId = classId,
-                        className = document.getString("className") ?: "",
-                        teacherId = teacherId,
-                        teacherEmail = document.getString("teacherEmail") ?: ""
-                    )
-                }.distinctBy { enrollment ->
-                    "${enrollment.teacherId}|" +
-                            "${enrollment.classId}|" +
-                            "${enrollment.subjectName.lowercase()}|" +
-                            enrollment.semester.lowercase()
-                }.sortedWith(
-                    compareBy<StudentEnrollment>(
-                        { it.semester },
-                        { it.subjectName }
-                    )
+                            val classId =
+                                document.getString("classId")
+                                    ?.trim()
+                                    .orEmpty()
+
+                            if (
+                                subjectName.isBlank() ||
+                                teacherId.isBlank() ||
+                                classId.isBlank()
+                            ) {
+                                return@mapNotNull null
+                            }
+
+                            StudentEnrollment(
+                                rosterId = document.id,
+                                name = document.getString("name") ?: "",
+                                email = document.getString("email") ?: "",
+                                rollNumber = document.getString("rollNumber") ?: "",
+                                department = document.getString("department") ?: "",
+                                section = document.getString("section") ?: "",
+                                subjectName = subjectName,
+                                semester = document.getString("semester") ?: "",
+                                classId = classId,
+                                className = document.getString("className") ?: "",
+                                teacherId = teacherId,
+                                teacherEmail = document.getString("teacherEmail") ?: ""
+                            )
+                        }.distinctBy {
+                            "${it.teacherId}|${it.classId}|${it.subjectName.lowercase()}|${it.semester.lowercase()}"
+                        }.sortedWith(
+                            compareBy<StudentEnrollment>(
+                                { it.semester },
+                                { it.subjectName }
+                            )
+                        )
+
+                        onSuccess(enrollments)
+                    },
+                    onFailure = onFailure
                 )
-
-                onSuccess(enrollments)
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.message
+                    exception.localizedMessage
                         ?: "Unable to load your assigned subjects."
                 )
             }
     }
 
-    // Find subjects assigned to a particular email.
-    // Retained for compatibility with existing callers.
     fun findSubjects(
         email: String,
         onSuccess: (List<String>) -> Unit,
@@ -155,13 +196,11 @@ class StudentRepository {
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.message ?: "Unable to find subjects."
+                    exception.localizedMessage ?: "Unable to find subjects."
                 )
             }
     }
 
-    // Verify student against teacher's roster and save details.
-    // Only CSV email matching is required. No email verification.
     fun verifyAndSaveStudent(
         uid: String,
         name: String,
@@ -180,59 +219,73 @@ class StudentRepository {
             return
         }
 
-        val studentData = hashMapOf<String, Any>(
-            "uid" to uid,
-            "email" to normalizedEmail,
-            "name" to name.trim(),
-            "rollNumber" to rollNumber.trim(),
-            "department" to department.trim(),
-            "section" to section.trim(),
-            "semester" to semester.trim(),
-            "role" to "Student"
-        )
-
         db.collection("studentRoster")
             .whereEqualTo("email", normalizedEmail)
             .get()
             .addOnSuccessListener { documents ->
 
                 if (documents.isEmpty) {
-                    onFailure(
-                        "No classrooms were found for this email ID."
-                    )
+                    onFailure("No classrooms were found for this email ID.")
                     return@addOnSuccessListener
                 }
 
-                val subjects = documents.mapNotNull { document ->
-                    document.getString("subjectName")
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-                }.distinct()
+                val studentData = hashMapOf<String, Any>(
+                    "uid" to uid,
+                    "email" to normalizedEmail,
+                    "name" to name.trim(),
+                    "rollNumber" to rollNumber.trim(),
+                    "department" to department.trim(),
+                    "section" to section.trim(),
+                    "semester" to semester.trim(),
+                    "subjects" to documents.mapNotNull {
+                        it.getString("subjectName")?.trim()
+                            ?.takeIf { subject -> subject.isNotBlank() }
+                    }.distinct(),
+                    "role" to "Student"
+                )
 
-                studentData["subjects"] = subjects
-
-                db.collection("students")
+                val studentDocument = db.collection("students")
                     .document(uid)
-                    .set(studentData)
+
+                // Link roster records and save the profile together.
+                val batch = db.batch()
+
+                for (document in documents.documents) {
+                    val existingUid = document.getString("studentUid")
+
+                    if (!existingUid.isNullOrBlank() && existingUid != uid) {
+                        onFailure(
+                            "A roster entry is already linked to another student account."
+                        )
+                        return@addOnSuccessListener
+                    }
+
+                    if (existingUid.isNullOrBlank()) {
+                        batch.update(document.reference, "studentUid", uid)
+                    }
+                }
+
+                batch.set(studentDocument, studentData)
+
+                batch.commit()
                     .addOnSuccessListener {
-                        onSuccess(subjects)
+                        onSuccess(studentData["subjects"] as List<String>)
                     }
                     .addOnFailureListener { exception ->
                         onFailure(
-                            exception.message
+                            exception.localizedMessage
                                 ?: "Unable to save student details."
                         )
                     }
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.message
+                    exception.localizedMessage
                         ?: "Unable to check the teacher's student roster."
                 )
             }
     }
 
-    // Get saved student details.
     fun getStudentDetails(
         uid: String,
         onSuccess: (StudentDetails) -> Unit,
@@ -267,13 +320,12 @@ class StudentRepository {
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.message
+                    exception.localizedMessage
                         ?: "Unable to load student details."
                 )
             }
     }
 
-    // Update student details without changing email or subjects.
     fun updateStudentDetails(
         uid: String,
         name: String,
@@ -300,7 +352,7 @@ class StudentRepository {
             }
             .addOnFailureListener { exception ->
                 onFailure(
-                    exception.message
+                    exception.localizedMessage
                         ?: "Unable to update student details."
                 )
             }
