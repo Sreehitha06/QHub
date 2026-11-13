@@ -1,3 +1,4 @@
+
 package com.qhub.quizapp
 
 import android.content.Context
@@ -67,7 +68,6 @@ fun TeacherDashboard(
     var showCsvUpload by remember { mutableStateOf(false) }
     var showCreateQuiz by remember { mutableStateOf(false) }
 
-    // QUIZ NAVIGATION
     var showManageQuizzes by remember { mutableStateOf(false) }
     var showQuizResults by remember { mutableStateOf(false) }
     var showEditQuiz by remember { mutableStateOf(false) }
@@ -98,7 +98,6 @@ fun TeacherDashboard(
         mutableStateOf(setOf<String>())
     }
 
-    // SUBJECT AND SEMESTER CONTEXTS GROUPED BY CLASS
     var rosterContextsByClass by remember {
         mutableStateOf<Map<String, List<QHubRosterContext>>>(emptyMap())
     }
@@ -167,7 +166,6 @@ fun TeacherDashboard(
                             .mapNotNull { it.getString("classId") }
                             .toSet()
 
-                        // Keep every subject-semester combination for each class.
                         rosterContextsByClass = rosterDocuments
                             .groupBy { document ->
                                 document.getString("classId").orEmpty()
@@ -216,7 +214,7 @@ fun TeacherDashboard(
         }
     }
 
-    // LOAD TEACHER PROFILE FROM FIRESTORE
+    // LOAD TEACHER PROFILE
     DisposableEffect(uid) {
         var profileRegistration: ListenerRegistration? = null
 
@@ -649,13 +647,29 @@ fun TeacherDashboard(
                                     )
                                 }
 
-                                Text(
-                                    if (hasRoster) "Open →" else "Locked",
-                                    color = if (hasRoster)
-                                        colors.primary
-                                    else
-                                        colors.onSurfaceVariant
-                                )
+                                // CLASS ACTIONS
+                                Column(
+                                    horizontalAlignment = Alignment.End
+                                ) {
+
+                                    Text(
+                                        if (hasRoster) "Open →" else "Locked",
+                                        color = if (hasRoster)
+                                            colors.primary
+                                        else
+                                            colors.onSurfaceVariant
+                                    )
+
+                                    Spacer(Modifier.height(4.dp))
+
+                                    if (uid != null) {
+                                        TeacherClassManagementActions(
+                                            teacherId = uid,
+                                            classId = teacherClass.id,
+                                            className = teacherClass.name
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -669,7 +683,6 @@ fun TeacherDashboard(
 
         } else {
 
-            // SELECTED CLASS NAVIGATION
             val currentClass = selectedTeacherClass!!
 
             when {
@@ -1448,7 +1461,6 @@ private fun TeacherClassHomeScreen(
 
         Spacer(Modifier.height(32.dp))
 
-        // CREATE QUIZ CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
@@ -1495,7 +1507,6 @@ private fun TeacherClassHomeScreen(
 
         Spacer(Modifier.height(20.dp))
 
-        // MANAGE QUIZZES CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),

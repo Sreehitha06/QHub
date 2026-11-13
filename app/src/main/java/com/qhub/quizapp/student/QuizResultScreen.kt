@@ -3,15 +3,14 @@ package com.qhub.quizapp.student
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qhub.quizapp.data.Quiz
@@ -19,140 +18,108 @@ import com.qhub.quizapp.data.Quiz
 private val ResultCream = Color(0xFFF0EEE8)
 private val ResultBlue = Color(0xFF2B4C63)
 private val ResultBlueGray = Color(0xFF6F8B9B)
-private val ResultWhite = Color(0xFFFFFFFF)
+private val ResultWhite = Color.White
 
 @Composable
 fun QuizResultScreen(
     quiz: Quiz,
-    answers: List<Int>,
+    correct: Int,
+    wrong: Int,
+    unanswered: Int,
+    marksObtained: Int,
+    totalMarks: Int,
     onBackToDashboard: () -> Unit
 ) {
-    val correct = quiz.questions.indices.count { index ->
-        answers.getOrNull(index) == quiz.questions[index].correctAnswerIndex
-    }
-
-    val answered = answers.take(quiz.questions.size).count { it != -1 }
-    val wrong = answered - correct
-    val unanswered = quiz.questions.size - answered
-
-    val percentage = if (quiz.questions.isNotEmpty()) {
-        (correct * 100) / quiz.questions.size
-    } else {
-        0
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(ResultCream)
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
+
         Text(
             text = "Quiz Completed!",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
-            color = ResultBlue
+            color = ResultBlue,
+            textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        Column(
+        Text(
+            text = quiz.title,
+            fontSize = 17.sp,
+            color = ResultBlueGray,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(35.dp))
+
+        Card(
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 8.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = ResultWhite
+            ),
+            elevation = CardDefaults.cardElevation(
+                defaultElevation = 4.dp
+            )
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = ResultWhite
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 45.dp, horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = quiz.title,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ResultBlue
-                    )
+                Text(
+                    text = "Your Marks",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ResultBlueGray
+                )
 
-                    Spacer(Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                    Text(
-                        text = "$percentage%",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ResultBlue
-                    )
+                Text(
+                    text = "$marksObtained / $totalMarks",
+                    fontSize = 42.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = ResultBlue
+                )
 
-                    Text(
-                        text = "Your Score",
-                        color = ResultBlueGray,
-                        fontSize = 16.sp
-                    )
+                Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(Modifier.height(24.dp))
-
-                    HorizontalDivider(color = ResultCream)
-
-                    ResultRow("Total Questions", quiz.questions.size)
-                    ResultRow("Correct Answers", correct)
-                    ResultRow("Wrong Answers", wrong)
-                    ResultRow("Unanswered", unanswered)
-                }
+                Text(
+                    text = "Marks Obtained",
+                    fontSize = 14.sp,
+                    color = ResultBlueGray
+                )
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         Button(
             onClick = onBackToDashboard,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = ResultBlue,
-                contentColor = ResultWhite
-            ),
-            shape = RoundedCornerShape(12.dp)
+                containerColor = ResultBlue
+            )
         ) {
             Text(
                 text = "Back to Dashboard",
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold,
+                color = ResultWhite
             )
         }
-    }
-}
-
-@Composable
-private fun ResultRow(label: String, value: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            color = ResultBlueGray,
-            fontSize = 15.sp
-        )
-
-        Text(
-            text = value.toString(),
-            color = ResultBlue,
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp
-        )
     }
 }

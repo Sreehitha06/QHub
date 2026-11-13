@@ -52,6 +52,18 @@ fun StudentDashboard(
         mutableStateOf<List<Int>>(emptyList())
     }
 
+    var resultCorrect by remember {
+        mutableIntStateOf(0)
+    }
+
+    var resultWrong by remember {
+        mutableIntStateOf(0)
+    }
+
+    var resultUnanswered by remember {
+        mutableIntStateOf(0)
+    }
+
     var showQuizUnavailableDialog by remember {
         mutableStateOf(false)
     }
@@ -419,6 +431,10 @@ fun StudentDashboard(
 
                                 onSuccess = { attemptedRecord, correct, wrong, unanswered ->
 
+                                    resultCorrect = correct
+                                    resultWrong = wrong
+                                    resultUnanswered = unanswered
+
                                     selectedRecord = attemptedRecord
 
                                     studentQuizRecords =
@@ -457,10 +473,21 @@ fun StudentDashboard(
             if (quiz != null) {
                 QuizResultScreen(
                     quiz = quiz,
-                    answers = submittedAnswers,
+                    correct = resultCorrect,
+                    wrong = resultWrong,
+                    unanswered = resultUnanswered,
+                    marksObtained = selectedRecord?.marksObtained
+                        ?: resultCorrect,
+                    totalMarks = selectedRecord?.totalMarks
+                        ?: quiz.questions.size,
                     onBackToDashboard = {
                         selectedRecord = null
                         submittedAnswers = emptyList()
+
+                        resultCorrect = 0
+                        resultWrong = 0
+                        resultUnanswered = 0
+
                         currentScreen = "dashboard"
                     }
                 )

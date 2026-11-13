@@ -151,8 +151,9 @@ object StudentQuizRepository {
                             }
                         }
 
-                        val totalMarks =
-                            record.totalMarks ?: quiz.questions.size
+                        // One mark per question.
+                        // Total marks always equal the question count.
+                        val totalMarks = quiz.questions.size
 
                         val marksObtained = correctCount
 
@@ -357,9 +358,10 @@ object StudentQuizRepository {
                                         quiz = quiz,
                                         scheduledDate = scheduledDate,
                                         scheduledTime = scheduledTime,
-                                        totalMarks =
-                                            (document.get("totalMarks") as? Number)
-                                                ?.toInt(),
+
+                                        // One mark per question.
+                                        totalMarks = questions.size,
+
                                         teacherId = enrollment.teacherId,
                                         classId = enrollment.classId
                                     )
@@ -411,13 +413,16 @@ object StudentQuizRepository {
             return
         }
 
-        val restoredRecords =
-            mutableListOf<StudentQuizRecord>()
+        val distinctRecords = records.distinctBy {
+            recordKey(it)
+        }
+
+        val restoredRecords = mutableListOf<StudentQuizRecord>()
 
         var completedReads = 0
         var failed = false
 
-        records.distinctBy { recordKey(it) }.forEach { record ->
+        distinctRecords.forEach { record ->
 
             quizReference(record)
                 .collection("attempts")
@@ -435,9 +440,14 @@ object StudentQuizRepository {
                                 marksObtained =
                                     (attemptSnapshot.get("marksObtained")
                                             as? Number)?.toInt(),
+
+                                // Preserve the total stored with an
+                                // existing attempt, falling back to
+                                // the current question count.
                                 totalMarks =
                                     (attemptSnapshot.get("totalMarks")
                                             as? Number)?.toInt()
+                                        ?: record.quiz?.questions?.size
                                         ?: record.totalMarks
                             )
 
@@ -449,10 +459,7 @@ object StudentQuizRepository {
 
                     completedReads++
 
-                    if (completedReads == records.distinctBy {
-                            recordKey(it)
-                        }.size
-                    ) {
+                    if (completedReads == distinctRecords.size) {
                         quizRecords.clear()
                         quizRecords.addAll(restoredRecords)
 
