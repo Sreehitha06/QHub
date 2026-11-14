@@ -134,6 +134,49 @@ fun QHubLoginScreen() {
         mutableStateOf<StudentDetails?>(null)
     }
 
+    // SAVE THE SELECTED ROLE ON THIS DEVICE
+    fun saveUserRole(user: FirebaseUser?, role: String) {
+        if (user == null) return
+
+        context.getSharedPreferences(
+            "QHubPrefs",
+            Context.MODE_PRIVATE
+        ).edit()
+            .putString("role_${user.uid}", role)
+            .apply()
+    }
+
+    // TEACHER ACCOUNT HANDLER
+    fun openTeacherAccount(user: FirebaseUser?) {
+        if (user == null) {
+            isLoading = false
+            Toast.makeText(
+                context,
+                "Unable to get teacher account",
+                Toast.LENGTH_SHORT
+            ).show()
+            auth.signOut()
+            return
+        }
+
+        saveUserRole(user, "Teacher")
+
+        teacherName = user.displayName ?: "Teacher"
+        teacherEmail = user.email ?: ""
+
+        showStudentDashboard = false
+        showStudentDetails = false
+        editingStudentDetails = null
+        showTeacherDashboard = true
+        isLoading = false
+
+        Toast.makeText(
+            context,
+            "Welcome $teacherName",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
     // COMMON STUDENT LOGIN HANDLER
     fun openStudentAccount(user: FirebaseUser?) {
         if (user == null) {
@@ -160,12 +203,7 @@ fun QHubLoginScreen() {
             return
         }
 
-        context.getSharedPreferences(
-            "QHubPrefs",
-            Context.MODE_PRIVATE
-        ).edit()
-            .putString("role_${user.uid}", "Student")
-            .apply()
+        saveUserRole(user, "Student")
 
         isLoading = true
 
@@ -199,6 +237,15 @@ fun QHubLoginScreen() {
                 }
             }
         )
+    }
+
+    // OPEN ACCOUNT ACCORDING TO THE SELECTED ROLE
+    fun openAccountForSelectedRole(user: FirebaseUser?) {
+        if (selectedRole == "Teacher") {
+            openTeacherAccount(user)
+        } else {
+            openStudentAccount(user)
+        }
     }
 
     // GOOGLE SIGN-IN CONFIGURATION
@@ -246,7 +293,9 @@ fun QHubLoginScreen() {
                         auth.signInWithCredential(credential)
                             .addOnCompleteListener { task ->
                                 if (task.isSuccessful) {
-                                    openStudentAccount(auth.currentUser)
+                                    openAccountForSelectedRole(
+                                        auth.currentUser
+                                    )
                                 } else {
                                     isLoading = false
                                     Toast.makeText(
@@ -298,10 +347,7 @@ fun QHubLoginScreen() {
             when (savedRole) {
                 "Teacher" -> {
                     selectedRole = "Teacher"
-                    teacherName = currentUser.displayName ?: "Teacher"
-                    teacherEmail = currentUser.email ?: ""
-                    showTeacherDashboard = true
-                    isLoading = false
+                    openTeacherAccount(currentUser)
                 }
 
                 "Student" -> {
@@ -652,14 +698,7 @@ fun QHubLoginScreen() {
 
                                 user?.updateProfile(profileUpdates)
 
-                                user?.uid?.let { uid ->
-                                    context.getSharedPreferences(
-                                        "QHubPrefs",
-                                        Context.MODE_PRIVATE
-                                    ).edit()
-                                        .putString("role_$uid", selectedRole)
-                                        .apply()
-                                }
+                                saveUserRole(user, selectedRole)
 
                                 Toast.makeText(
                                     context,
@@ -684,33 +723,17 @@ fun QHubLoginScreen() {
                             email.trim().lowercase(),
                             password
                         ).addOnCompleteListener { task ->
-                            isLoading = false
-
                             if (task.isSuccessful) {
                                 val user = auth.currentUser
-                                val uid = user?.uid
 
-                                val savedRole = uid?.let {
-                                    context.getSharedPreferences(
-                                        "QHubPrefs",
-                                        Context.MODE_PRIVATE
-                                    ).getString("role_$it", selectedRole)
-                                } ?: selectedRole
-
-                                if (savedRole == "Teacher") {
-                                    teacherName = user?.displayName ?: "Teacher"
-                                    teacherEmail = user?.email ?: email
-                                    showTeacherDashboard = true
-
-                                    Toast.makeText(
-                                        context,
-                                        "Welcome $teacherName",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                // Use the role selected on the login screen.
+                                if (selectedRole == "Teacher") {
+                                    openTeacherAccount(user)
                                 } else {
                                     openStudentAccount(user)
                                 }
                             } else {
+                                isLoading = false
                                 Toast.makeText(
                                     context,
                                     task.exception?.message ?: "Login failed",
@@ -744,77 +767,75 @@ fun QHubLoginScreen() {
                 }
             }
 
-            // GOOGLE SIGN-IN - STUDENTS ONLY
-            if (selectedRole == "Student" && !isRegistering) {
-                Spacer(modifier = Modifier.height(20.dp))
+            // GOOGLE SIGN-IN - BOTH TEACHERS AND STUDENTS
+            Spacer(modifier = Modifier.height(20.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = Beige
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Beige
+                )
+
+                Text(
+                    text = "  OR  ",
+                    color = BlueGray,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Beige
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            OutlinedButton(
+                onClick = {
+                    isLoading = true
+                    googleSignInLauncher.launch(
+                        googleSignInClient.signInIntent
                     )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = RoundedCornerShape(15.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = White,
+                    contentColor = DeepBlue
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    Beige
+                ),
+                enabled = !isLoading
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = DeepBlue,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = "G",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepBlue
+                    )
+
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Text(
-                        text = "  OR  ",
-                        color = BlueGray,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        text = "Continue with Google",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
-
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = Beige
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        isLoading = true
-                        googleSignInLauncher.launch(
-                            googleSignInClient.signInIntent
-                        )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(15.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = White,
-                        contentColor = DeepBlue
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        Beige
-                    ),
-                    enabled = !isLoading
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = DeepBlue,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = "G",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepBlue
-                        )
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Text(
-                            text = "Continue with Google",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
                 }
             }
 

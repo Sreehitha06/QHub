@@ -1,4 +1,3 @@
-
 package com.qhub.quizapp.student
 
 import android.app.AlarmManager
@@ -75,8 +74,6 @@ object QuizNotificationScheduler {
                     return@forEach
                 }
 
-                activeKeys.add(key)
-
                 val intent = Intent(
                     context,
                     QuizReminderReceiver::class.java
@@ -97,53 +94,85 @@ object QuizNotificationScheduler {
                 )
 
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 
-                        if (alarmManager.canScheduleExactAlarms()) {
-                            alarmManager.setExactAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP,
+                    val exactAllowed =
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            alarmManager.canScheduleExactAlarms()
+                        } else {
+                            true
+                        }
+
+                    if (exactAllowed) {
+
+                        try {
+                            scheduleExactAlarm(
+                                alarmManager,
                                 reminderTime,
                                 pendingIntent
                             )
+
                             Log.d(
                                 "QHubNotification",
                                 "Exact reminder scheduled for $reminderTime"
                             )
-                        } else {
-                            alarmManager.setAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP,
+
+                        } catch (e: SecurityException) {
+
+                            Log.w(
+                                "QHubNotification",
+                                "Exact alarm failed. Trying inexact alarm.",
+                                e
+                            )
+
+                            scheduleInexactAlarm(
+                                alarmManager,
                                 reminderTime,
                                 pendingIntent
                             )
-                            Log.w(
-                                "QHubNotification",
-                                "Exact alarm access not granted. Using inexact alarm."
-                            )
                         }
-
-                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-
-                        alarmManager.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP,
-                            reminderTime,
-                            pendingIntent
-                        )
 
                     } else {
 
-                        alarmManager.setExact(
-                            AlarmManager.RTC_WAKEUP,
+                        scheduleInexactAlarm(
+                            alarmManager,
                             reminderTime,
                             pendingIntent
                         )
                     }
 
-                } catch (e: SecurityException) {
+                    activeKeys.add(key)
+
+                } catch (e: Exception) {
+
                     Log.e(
                         "QHubNotification",
-                        "Unable to schedule reminder",
+                        "Normal alarm scheduling failed. Trying last fallback.",
                         e
                     )
+
+                    // Last fallback: ordinary inexact alarm.
+                    try {
+                        alarmManager.set(
+                            AlarmManager.RTC_WAKEUP,
+                            reminderTime,
+                            pendingIntent
+                        )
+
+                        activeKeys.add(key)
+
+                        Log.w(
+                            "QHubNotification",
+                            "Last-resort inexact reminder scheduled."
+                        )
+
+                    } catch (fallbackException: Exception) {
+
+                        Log.e(
+                            "QHubNotification",
+                            "All alarm scheduling attempts failed.",
+                            fallbackException
+                        )
+                    }
                 }
             }
 
@@ -174,6 +203,54 @@ object QuizNotificationScheduler {
         preferences.edit()
             .putStringSet(SCHEDULED_KEYS, activeKeys)
             .apply()
+    }
+
+    private fun scheduleExactAlarm(
+        alarmManager: AlarmManager,
+        reminderTime: Long,
+        pendingIntent: PendingIntent
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                reminderTime,
+                pendingIntent
+            )
+        } else {
+            alarmManager.setExact(
+                AlarmManager.RTC_WAKEUP,
+                reminderTime,
+                pendingIntent
+            )
+        }
+    }
+
+    private fun scheduleInexactAlarm(
+        alarmManager: AlarmManager,
+        reminderTime: Long,
+        pendingIntent: PendingIntent
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                reminderTime,
+                pendingIntent
+            )
+
+        } else {
+
+            alarmManager.set(
+                AlarmManager.RTC_WAKEUP,
+                reminderTime,
+                pendingIntent
+            )
+        }
+
+        Log.w(
+            "QHubNotification",
+            "Inexact reminder scheduled for $reminderTime"
+        )
     }
 
     private fun parseSchedule(
@@ -261,7 +338,9 @@ object QuizNotificationScheduler {
             context,
             CHANNEL_ID
         )
-            .setSmallIcon(com.qhub.quizapp.R.drawable.ic_launcher_foreground)
+            .setSmallIcon(
+                com.qhub.quizapp.R.drawable.ic_launcher_foreground
+            )
             .setContentTitle("Quiz starting soon!")
             .setContentText("$subjectName quiz starts in 10 minutes.")
             .setStyle(
