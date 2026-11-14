@@ -70,7 +70,24 @@ object QuizNotificationScheduler {
                 val reminderTime =
                     quizStartTime - REMINDER_BEFORE_MILLIS
 
+                // FIX: Preserve an existing reminder if its time has passed
+                // but the quiz is still upcoming.
                 if (reminderTime <= currentTime) {
+
+                    if (key in previousKeys) {
+                        activeKeys.add(key)
+
+                        Log.d(
+                            "QHubNotification",
+                            "Preserving previously scheduled reminder for $key"
+                        )
+                    } else {
+                        Log.d(
+                            "QHubNotification",
+                            "Reminder time already passed for new quiz: $key"
+                        )
+                    }
+
                     return@forEach
                 }
 
@@ -150,7 +167,6 @@ object QuizNotificationScheduler {
                         e
                     )
 
-                    // Last fallback: ordinary inexact alarm.
                     try {
                         alarmManager.set(
                             AlarmManager.RTC_WAKEUP,
