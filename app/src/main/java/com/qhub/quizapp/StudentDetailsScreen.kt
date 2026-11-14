@@ -43,7 +43,9 @@ fun StudentDetailsScreen(
         mutableStateOf(existingDetails?.semester ?: "")
     }
 
-    var errorMessage by remember { mutableStateOf("") }
+    var errorMessage by remember {
+        mutableStateOf("")
+    }
 
     Column(
         modifier = Modifier
@@ -52,6 +54,18 @@ fun StudentDetailsScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+
+        // BACK BUTTON - VISIBLE FOR FIRST-TIME AND EXISTING STUDENTS
+        TextButton(
+            onClick = onBack,
+            contentPadding = PaddingValues(0.dp)
+        ) {
+            Text(
+                text = "← Back to Dashboard",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
 
         Text(
             text = if (existingDetails == null)
@@ -150,15 +164,6 @@ fun StudentDetailsScreen(
                 .height(52.dp)
         ) {
             Text("Save Details")
-        }
-
-        if (existingDetails != null) {
-            OutlinedButton(
-                onClick = onBack,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Cancel")
-            }
         }
     }
 }

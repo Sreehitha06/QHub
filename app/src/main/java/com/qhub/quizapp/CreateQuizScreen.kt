@@ -1,6 +1,7 @@
 
 package com.qhub.quizapp
 
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,10 +10,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 data class QHubQuizQuestionDraft(
     val question: String = "",
@@ -44,9 +48,9 @@ fun CreateQuizScreen(
     ) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
 
     var quizTitle by remember { mutableStateOf("") }
-
     var questions by remember {
         mutableStateOf(listOf(QHubQuizQuestionDraft()))
     }
@@ -82,7 +86,8 @@ fun CreateQuizScreen(
 
     LaunchedEffect(availableRosterContexts) {
         if (availableRosterContexts.isNotEmpty()) {
-            if (selectedSubject.isBlank() ||
+            if (
+                selectedSubject.isBlank() ||
                 availableSubjects.none {
                     it.equals(selectedSubject, ignoreCase = true)
                 }
@@ -93,7 +98,8 @@ fun CreateQuizScreen(
     }
 
     LaunchedEffect(selectedSubject, availableSemesters) {
-        if (availableSemesters.isNotEmpty() &&
+        if (
+            availableSemesters.isNotEmpty() &&
             availableSemesters.none {
                 it.equals(selectedSemester, ignoreCase = true)
             }
@@ -113,10 +119,22 @@ fun CreateQuizScreen(
         mutableStateOf(LocalDate.now().toString())
     }
 
+    // Stored internally in 24-hour format for Firestore and notifications.
     var scheduledTime by remember {
         mutableStateOf(
-            LocalTime.now().withSecond(0).withNano(0).toString()
+            LocalTime.now().withSecond(0).withNano(0).format(
+                DateTimeFormatter.ofPattern("HH:mm")
+            )
         )
+    }
+
+    // Displayed to the teacher in 12-hour AM/PM format.
+    val displayScheduledTime = remember(scheduledTime) {
+        runCatching {
+            LocalTime.parse(scheduledTime).format(
+                DateTimeFormatter.ofPattern("hh:mm a", Locale.US)
+            )
+        }.getOrDefault(scheduledTime)
     }
 
     var shuffleQuestions by remember { mutableStateOf(false) }
@@ -132,7 +150,6 @@ fun CreateQuizScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-
         TextButton(
             onClick = onBack,
             enabled = !isSaving
@@ -159,7 +176,6 @@ fun CreateQuizScreen(
         )
 
         Box(modifier = Modifier.fillMaxWidth()) {
-
             OutlinedButton(
                 onClick = { subjectExpanded = true },
                 enabled = !isSaving && availableSubjects.isNotEmpty(),
@@ -201,7 +217,6 @@ fun CreateQuizScreen(
         )
 
         Box(modifier = Modifier.fillMaxWidth()) {
-
             OutlinedButton(
                 onClick = { semesterExpanded = true },
                 enabled = !isSaving && availableSemesters.isNotEmpty(),
@@ -259,7 +274,6 @@ fun CreateQuizScreen(
         )
 
         questions.forEachIndexed { questionIndex, question ->
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp)
@@ -268,7 +282,6 @@ fun CreateQuizScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -297,8 +310,9 @@ fun CreateQuizScreen(
                         value = question.question,
                         onValueChange = { newValue ->
                             questions = questions.toMutableList().also {
-                                it[questionIndex] =
-                                    question.copy(question = newValue)
+                                it[questionIndex] = question.copy(
+                                    question = newValue
+                                )
                             }
                         },
                         label = { Text("Enter Question") },
@@ -310,12 +324,10 @@ fun CreateQuizScreen(
                     Text("Options (select the correct answer)")
 
                     question.options.forEachIndexed { optionIndex, option ->
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-
                             RadioButton(
                                 selected = question.correctAnswerIndex == optionIndex,
                                 onClick = {
@@ -384,7 +396,6 @@ fun CreateQuizScreen(
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-
             OutlinedTextField(
                 value = durationHours,
                 onValueChange = {
@@ -427,14 +438,35 @@ fun CreateQuizScreen(
             enabled = !isSaving
         )
 
-        OutlinedTextField(
-            value = scheduledTime,
-            onValueChange = { scheduledTime = it },
-            label = { Text("Time (HH:MM)") },
+        // AM/PM time picker
+        OutlinedButton(
+            onClick = {
+                val currentTime = LocalTime.parse(scheduledTime)
+
+                TimePickerDialog(
+                    context,
+                    { _, hourOfDay, minute ->
+                        scheduledTime = String.format(
+                            Locale.US,
+                            "%02d:%02d",
+                            hourOfDay,
+                            minute
+                        )
+                    },
+                    currentTime.hour,
+                    currentTime.minute,
+                    false // Force 12-hour format with AM/PM.
+                ).show()
+            },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !isSaving
-        )
+            enabled = !isSaving,
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Text(
+                "Select Time: $displayScheduledTime",
+                modifier = Modifier.padding(vertical = 6.dp)
+            )
+        }
 
         HorizontalDivider()
 
@@ -499,7 +531,6 @@ fun CreateQuizScreen(
                     }
 
                 when {
-
                     selectedSubject.isBlank() -> {
                         errorMessage = "Select a subject."
                     }
@@ -559,7 +590,6 @@ fun CreateQuizScreen(
                             shuffleQuestions,
                             shuffleOptions
                         ) { success, message ->
-
                             isSaving = false
 
                             if (success) {

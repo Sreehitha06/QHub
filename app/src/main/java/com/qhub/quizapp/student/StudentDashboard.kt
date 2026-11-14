@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,12 +28,45 @@ import com.qhub.quizapp.StudentRepository
 import com.qhub.quizapp.data.StudentQuizRepository
 import com.qhub.quizapp.data.StudentQuizRecord
 import com.qhub.quizapp.data.StudentQuizStatus
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 private val Cream = Color(0xFFF0EEE8)
 private val Taupe = Color(0xFFB1A496)
 private val BlueGray = Color(0xFF6F8B9B)
 private val DeepBlue = Color(0xFF2B4C63)
 private val White = Color(0xFFFFFFFF)
+
+/**
+ * Checks whether the current time is inside the scheduled quiz window.
+ * The quiz window begins at scheduledDate + scheduledTime
+ * and ends after quiz.durationMinutes.
+ */
+private fun isQuizWithinSchedule(record: StudentQuizRecord): Boolean {
+    return try {
+        val quiz = record.quiz ?: return false
+
+        val formatter = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm",
+            Locale.getDefault()
+        ).apply {
+            isLenient = false
+        }
+
+        val startTime = formatter.parse(
+            "${record.scheduledDate.trim()} ${record.scheduledTime.trim()}"
+        )?.time ?: return false
+
+        val duration = quiz.durationMinutes.coerceAtLeast(0)
+        val endTime = startTime + duration * 60_000L
+        val now = System.currentTimeMillis()
+
+        now >= startTime && now < endTime
+    } catch (e: Exception) {
+        false
+    }
+}
 
 @Composable
 fun StudentDashboard(
@@ -41,8 +75,15 @@ fun StudentDashboard(
     },
     onEditProfile: (StudentDetails) -> Unit = {}
 ) {
-    var currentScreen by remember { mutableStateOf("dashboard") }
-    var profileMenuExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    var currentScreen by remember {
+        mutableStateOf("dashboard")
+    }
+
+    var profileMenuExpanded by remember {
+        mutableStateOf(false)
+    }
 
     var selectedRecord by remember {
         mutableStateOf<StudentQuizRecord?>(null)
@@ -100,13 +141,27 @@ fun StudentDashboard(
         StudentRepository()
     }
 
+    // Create the notification channel.
+    // Permission is requested only once from MainActivity.
+    LaunchedEffect(Unit) {
+        QuizNotificationScheduler.createNotificationChannel(context)
+    }
+
     fun loadStudentQuizzes() {
         quizzesLoading = true
         quizzesError = ""
 
         StudentQuizRepository.loadStudentQuizzes(
             onSuccess = { records ->
+
                 studentQuizRecords = records
+
+                // Register reminders for upcoming quizzes.
+                QuizNotificationScheduler.schedule(
+                    context = context,
+                    records = records
+                )
+
                 quizzesLoading = false
                 quizzesError = ""
             },
@@ -137,11 +192,37 @@ fun StudentDashboard(
         }
 
         if (
+            currentScreen == "dashboard" ||
             currentScreen == "upcoming" ||
             currentScreen == "attempted" ||
             currentScreen == "unattempted"
         ) {
             loadStudentQuizzes()
+        }
+    }
+
+    // Keep checking the quiz time while the student is attempting it.
+    // Return to Upcoming Quizzes when the scheduled duration expires.
+    LaunchedEffect(currentScreen, selectedRecord) {
+        if (currentScreen == "quiz") {
+            val record = selectedRecord
+
+            if (record == null || !isQuizWithinSchedule(record)) {
+                submissionError = "The scheduled quiz time is not active."
+                currentScreen = "upcoming"
+            } else {
+                while (currentScreen == "quiz") {
+                    delay(1000)
+
+                    if (!isQuizWithinSchedule(record)) {
+                        submissionError =
+                            "The scheduled quiz time has expired. Your quiz attempt can no longer continue."
+
+                        currentScreen = "upcoming"
+                        break
+                    }
+                }
+            }
         }
     }
 
@@ -385,11 +466,14 @@ fun StudentDashboard(
                         currentScreen = "dashboard"
                     },
                     onAttemptQuiz = { record ->
-                        if (record.quiz != null) {
+                        if (record.quiz == null) {
+                            showQuizUnavailableDialog = true
+                        } else if (!isQuizWithinSchedule(record)) {
+                            submissionError =
+                                "This quiz is not currently available. You can attempt it only during its scheduled time."
+                        } else {
                             selectedRecord = record
                             currentScreen = "instructions"
-                        } else {
-                            showQuizUnavailableDialog = true
                         }
                     }
                 )
@@ -397,13 +481,25 @@ fun StudentDashboard(
         }
 
         "instructions" -> {
-            val quiz = selectedRecord?.quiz
+            val record = selectedRecord
+            val quiz = record?.quiz
 
-            if (quiz != null) {
+            if (quiz != null && record != null) {
                 QuizInstructions(
                     quiz = quiz,
+                    scheduledDate = record.scheduledDate,
+                    scheduledTime = record.scheduledTime,
+                    onBack = {
+                        currentScreen = "upcoming"
+                    },
                     onStartQuiz = {
-                        currentScreen = "quiz"
+                        // Recheck the schedule when Start Quiz is tapped.
+                        if (isQuizWithinSchedule(record)) {
+                            currentScreen = "quiz"
+                        } else {
+                            submissionError =
+                                "The quiz is not currently within its scheduled time."
+                        }
                     }
                 )
             } else {
@@ -413,8 +509,9 @@ fun StudentDashboard(
 
         "quiz" -> {
             val quiz = selectedRecord?.quiz
+            val record = selectedRecord
 
-            if (quiz != null) {
+            if (quiz != null && record != null) {
                 QuizScreen(
                     quiz = quiz,
                     onSubmit = { answers: List<Int> ->
@@ -422,9 +519,11 @@ fun StudentDashboard(
                         submittedAnswers = answers
                         submissionError = ""
 
-                        val record = selectedRecord
-
-                        if (record != null) {
+                        // Do not allow submission after the scheduled end time.
+                        if (!isQuizWithinSchedule(record)) {
+                            submissionError =
+                                "The scheduled quiz time has expired. Your answers cannot be submitted."
+                        } else {
                             StudentQuizRepository.submitQuizAttempt(
                                 record = record,
                                 answers = answers,
@@ -457,8 +556,6 @@ fun StudentDashboard(
                                     submissionError = error
                                 }
                             )
-                        } else {
-                            submissionError = "Quiz information is unavailable."
                         }
                     }
                 )
@@ -639,7 +736,7 @@ fun StudentDashboard(
                 submissionError = ""
             },
             title = {
-                Text("Submission Failed")
+                Text("Quiz Notice")
             },
             text = {
                 Text(submissionError)

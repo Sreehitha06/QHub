@@ -1,14 +1,18 @@
 
 package com.qhub.quizapp
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -49,6 +53,7 @@ private val BlueGray = Color(0xFF6F8B9B)
 private val DeepBlue = Color(0xFF2B4C63)
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -69,6 +74,36 @@ class MainActivity : ComponentActivity() {
                 )
             ) {
                 QHubLoginScreen()
+            }
+        }
+
+        // Request notification permission on first app launch.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            val prefs = getSharedPreferences(
+                "qhub_notification_prefs",
+                MODE_PRIVATE
+            )
+
+            if (!prefs.getBoolean("permission_requested", false)) {
+
+                window.decorView.post {
+                    if (
+                        ContextCompat.checkSelfPermission(
+                            this,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestPermissions(
+                            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                            1001
+                        )
+                    }
+
+                    prefs.edit()
+                        .putBoolean("permission_requested", true)
+                        .apply()
+                }
             }
         }
     }
@@ -248,6 +283,47 @@ fun QHubLoginScreen() {
             }
         }
 
+    // RESTORE THE EXISTING FIREBASE SESSION WHEN APP OPENS
+    LaunchedEffect(Unit) {
+        val currentUser = auth.currentUser
+
+        if (currentUser != null) {
+            isLoading = true
+
+            val savedRole = context.getSharedPreferences(
+                "QHubPrefs",
+                Context.MODE_PRIVATE
+            ).getString("role_${currentUser.uid}", null)
+
+            when (savedRole) {
+                "Teacher" -> {
+                    selectedRole = "Teacher"
+                    teacherName = currentUser.displayName ?: "Teacher"
+                    teacherEmail = currentUser.email ?: ""
+                    showTeacherDashboard = true
+                    isLoading = false
+                }
+
+                "Student" -> {
+                    selectedRole = "Student"
+                    openStudentAccount(currentUser)
+                }
+
+                else -> {
+                    // Do not guess the user's role.
+                    auth.signOut()
+                    isLoading = false
+
+                    Toast.makeText(
+                        context,
+                        "Please log in again and select your role.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
     // STUDENT DASHBOARD
     if (showStudentDashboard) {
         StudentDashboard(
@@ -284,11 +360,30 @@ fun QHubLoginScreen() {
         StudentDetailsScreen(
             email = studentEmail,
             existingDetails = editingStudentDetails,
+
             onBack = {
-                editingStudentDetails = null
-                showStudentDetails = false
-                showStudentDashboard = true
+                if (editingStudentDetails != null) {
+                    editingStudentDetails = null
+                    showStudentDetails = false
+                    showStudentDashboard = true
+                } else {
+                    auth.signOut()
+
+                    showStudentDetails = false
+                    showStudentDashboard = false
+                    editingStudentDetails = null
+
+                    studentEmail = ""
+                    email = ""
+                    password = ""
+                    name = ""
+
+                    selectedRole = "Student"
+                    isRegistering = false
+                    isLoading = false
+                }
             },
+
             onSave = { studentName, roll, dept, sec, sem ->
                 val user = auth.currentUser
 
@@ -613,7 +708,6 @@ fun QHubLoginScreen() {
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 } else {
-                                    // STUDENT EMAIL/PASSWORD LOGIN
                                     openStudentAccount(user)
                                 }
                             } else {
